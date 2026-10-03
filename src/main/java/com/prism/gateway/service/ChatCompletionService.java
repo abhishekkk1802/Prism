@@ -2,7 +2,7 @@ package com.prism.gateway.service;
 
 import com.prism.gateway.config.model.ModelAliasConfig;
 import com.prism.gateway.dto.ChatCompletionRequest;
-import com.prism.gateway.dto.ChatCompletionStreamChunk;
+import com.prism.gateway.exception.ModelNotAllowedException;
 import com.prism.gateway.routing.DifficultyClassifier;
 import com.prism.gateway.routing.ModelResolver;
 import com.prism.gateway.routing.ProviderRegistry;
@@ -12,8 +12,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.ObjectMapper;
 
-import java.time.Instant;
-import java.util.List;
 
 
 @Service
@@ -36,56 +34,71 @@ public class ChatCompletionService {
     public Mono<ProviderExecutionResult> complete(
             ChatCompletionRequest request
     ){
-        ModelAliasConfig modelConfig = modelResolver.resolve(request.model());
+        return Mono.deferContextual(ctx -> {
+            ApiKeyPolicy policy = ctx.get(ApiKeyPolicy.class);
 
-        if("auto".equals(request.model())){
-            String difficulty = difficultyClassifier.classify(request);
-
-            String routedAlias = modelConfig.route_by_difficulty()
-                    .get(difficulty);
-
-            if(routedAlias == null){
-                throw new IllegalStateException(
-                        "No route configured for difficulty: "
-                        + difficulty
-                );
+            if (!apiKeyService.isModelAllowed(policy, request.model())) {
+                return Mono.error(new ModelNotAllowedException(
+                        "Model '" + request.model() + "' is not allowed for this API key"
+                ));
             }
 
-            modelConfig = modelResolver.resolve(routedAlias);
+            ModelAliasConfig modelConfig = modelResolver.resolve(request.model());
 
-            System.out.println(
-                    "Auto routing: "
-                    + difficulty
-                    + " -> "
-                    + routedAlias
-            );
-        }
+            if("auto".equals(request.model())){
+                String difficulty = difficultyClassifier.classify(request);
 
-        return Mono.just(
-                providerExecutor.execute(
-                        request,
-                        modelConfig
-                )
-        );
+                String routedAlias = modelConfig.route_by_difficulty()
+                        .get(difficulty);
+
+                if(routedAlias == null){
+                    throw new IllegalStateException(
+                            "No route configured for difficulty: "
+                            + difficulty
+                    );
+                }
+
+                ModelAliasConfig finalModelConfig = modelResolver.resolve(routedAlias);
+
+                System.out.println(
+                        "Auto routing: "
+                        + difficulty
+                        + " -> "
+                        + routedAlias
+                );
+
+                return Mono.just(providerExecutor.execute(request, finalModelConfig));
+            }
+
+            return Mono.just(providerExecutor.execute(request, modelConfig));
+        });
     }
 
     public Mono<ProviderStreamResult> stream(
             ChatCompletionRequest request
     ) {
+        return Mono.deferContextual(ctx -> {
+            ApiKeyPolicy policy = ctx.get(ApiKeyPolicy.class);
 
-        ModelAliasConfig modelConfig =
-                modelResolver.resolve(request.model());
+            if (!apiKeyService.isModelAllowed(policy, request.model())) {
+                return Mono.error(new ModelNotAllowedException(
+                        "Model '" + request.model() + "' is not allowed for this API key"
+                ));
+            }
 
-        return providerExecutor.stream(request, modelConfig)
-                .map(result -> {
-                    Flux<String> finalStream = result.stream().concatWithValues("[DONE]");
-                    return new ProviderStreamResult(
-                            finalStream,
-                            result.provider(),
-                            result.model(),
-                            result.fallback()
-                    );
-                });
+            ModelAliasConfig modelConfig = modelResolver.resolve(request.model());
+
+            return providerExecutor.stream(request, modelConfig)
+                    .map(result -> {
+                        Flux<String> finalStream = result.stream().concatWithValues("[DONE]");
+                        return new ProviderStreamResult(
+                                finalStream,
+                                result.provider(),
+                                result.model(),
+                                result.fallback()
+                        );
+                    });
+        });
     }
 
 }
