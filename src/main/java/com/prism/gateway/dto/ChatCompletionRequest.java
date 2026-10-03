@@ -1,9 +1,7 @@
 package com.prism.gateway.dto;
 
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
-import org.springframework.ai.chat.messages.Message;
 
 import java.util.List;
 
@@ -12,9 +10,14 @@ public record ChatCompletionRequest(
         String model,
 
         @NotEmpty
-        @Valid
-        List<Message> messages
+        List<Message> messages,
+
+        Boolean stream
 ) {
+
+        public boolean isStream() {
+                return Boolean.TRUE.equals(stream);
+        }
 
         public record Message(
                 @NotBlank

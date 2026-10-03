@@ -8,6 +8,7 @@ import com.prism.gateway.dto.ChatCompletionResponse;
 import com.prism.gateway.routing.ProviderRegistry;
 import com.prism.gateway.routing.ProviderResolver;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 @Service
 public class ProviderExecutor {
@@ -25,7 +26,7 @@ public class ProviderExecutor {
         this.gatewayConfig = gatewayConfig;
     }
 
-    public ChatCompletionResponse execute(
+    public ProviderExecutionResult execute(
             ChatCompletionRequest request,
             ModelAliasConfig modelConfig
     ){
@@ -61,7 +62,204 @@ public class ProviderExecutor {
     }
 
 
-    private ChatCompletionResponse executeWithRetry(
+    public ProviderStreamResult stream(
+            ChatCompletionRequest request,
+            ModelAliasConfig modelConfig
+    ) {
+        ProviderStreamResult primary =
+                streamWithRetry(
+                        request,
+                        modelConfig.primary()
+                );
+
+        Flux<String> streamWithFallback =
+                primary.stream()
+                        .onErrorResume(primaryException -> {
+
+                            System.out.println(
+                                    "Primary provider streaming failed after retries: "
+                                            + modelConfig.primary()
+                            );
+
+                            primaryException.printStackTrace();
+
+                            if (modelConfig.fallbacks() == null ||
+                                    modelConfig.fallbacks().isEmpty()) {
+
+                                return Flux.error(
+                                        new IllegalStateException(
+                                                "All providers failed for model: "
+                                                        + request.model(),
+                                                primaryException
+                                        )
+                                );
+                            }
+
+                            return streamFallbacks(
+                                    request,
+                                    modelConfig.fallbacks(),
+                                    0,
+                                    primaryException
+                            );
+                        });
+
+        return new ProviderStreamResult(
+                streamWithFallback,
+                primary.provider(),
+                primary.model()
+        );
+    }
+
+    private Flux<String> streamFallbacks(
+            ChatCompletionRequest request,
+            java.util.List<String> fallbacks,
+            int index,
+            Throwable previousException
+    ) {
+
+        if (index >= fallbacks.size()) {
+            return Flux.error(
+                    new IllegalStateException(
+                            "All providers failed for model: "
+                                    + request.model(),
+                            previousException
+                    )
+            );
+        }
+
+        String fallbackModel = fallbacks.get(index);
+
+        System.out.println(
+                "Switching to fallback model: "
+                        + fallbackModel
+        );
+
+        ProviderStreamResult fallback;
+
+        try {
+            fallback = streamWithRetry(
+                    request,
+                    fallbackModel
+            );
+        } catch (Exception exception) {
+
+            System.out.println(
+                    "Failed to start fallback model: "
+                            + fallbackModel
+            );
+
+            return streamFallbacks(
+                    request,
+                    fallbacks,
+                    index + 1,
+                    exception
+            );
+        }
+
+        return fallback.stream()
+                .onErrorResume(exception -> {
+
+                    System.out.println(
+                            "Fallback model failed: "
+                                    + fallbackModel
+                    );
+
+                    exception.printStackTrace();
+
+                    return streamFallbacks(
+                            request,
+                            fallbacks,
+                            index + 1,
+                            exception
+                    );
+                });
+    }
+
+    private ProviderStreamResult streamWithRetry(
+            ChatCompletionRequest request,
+            String model
+    ) {
+
+        int maxAttempts =
+                gatewayConfig.retry().max_attempts();
+
+        long backoffMs =
+                gatewayConfig.retry().initial_backoff_ms();
+
+        double multiplier =
+                gatewayConfig.retry().backoff_multiplier();
+
+        try {
+
+            System.out.println(
+                    "Starting streaming request for model "
+                            + model
+            );
+
+            ProviderStreamResult result =
+                    streamWithModel(request, model);
+
+            Flux<String> retriedStream =
+                    result.stream()
+                            .retryWhen(
+                                    reactor.util.retry.Retry
+                                            .backoff(
+                                                    maxAttempts - 1,
+                                                    java.time.Duration.ofMillis(backoffMs)
+                                            )
+                                            .multiplier(multiplier)
+                                            .doBeforeRetry(signal ->
+                                                    System.out.println(
+                                                            "Streaming retry "
+                                                                    + (signal.totalRetries() + 2)
+                                                                    + "/"
+                                                                    + maxAttempts
+                                                                    + " for model "
+                                                                    + model
+                                                    )
+                                            )
+                            );
+
+            return new ProviderStreamResult(
+                    retriedStream,
+                    result.provider(),
+                    result.model()
+            );
+
+        } catch (Exception exception) {
+
+            throw new IllegalStateException(
+                    "Failed to start streaming for model " + model,
+                    exception
+            );
+        }
+    }
+
+    private ProviderStreamResult streamWithModel(
+            ChatCompletionRequest request,
+            String model
+    ) {
+
+        String providerName =
+                providerResolver.resolveProvider(model);
+
+        ProviderConfig provider =
+                providerRegistry.getProvider(providerName);
+
+        Flux<String> stream = llmProvider.stream(
+                request,
+                provider,
+                model
+        );
+
+        return new ProviderStreamResult(
+                stream,
+                providerName,
+                model
+        );
+    }
+
+    private ProviderExecutionResult executeWithRetry(
             ChatCompletionRequest request,
             String model
     ) {
@@ -122,16 +320,22 @@ public class ProviderExecutor {
 
 
 
-    private ChatCompletionResponse executeWithModel(ChatCompletionRequest request, String model) {
+    private ProviderExecutionResult executeWithModel(ChatCompletionRequest request, String model) {
 
         String  providerName = providerResolver.resolveProvider(model);
 
         ProviderConfig provider = providerRegistry.getProvider(providerName);
 
-        return llmProvider.complete(
+        ChatCompletionResponse response = llmProvider.complete(
                 request,
                 provider,
                 model
+        );
+
+        return new ProviderExecutionResult(
+          response,
+          providerName,
+          model
         );
     }
 }

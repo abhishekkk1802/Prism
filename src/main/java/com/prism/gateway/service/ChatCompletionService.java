@@ -1,16 +1,17 @@
 package com.prism.gateway.service;
 
 import com.prism.gateway.config.model.ModelAliasConfig;
-import com.prism.gateway.config.model.ProviderConfig;
 import com.prism.gateway.dto.ChatCompletionRequest;
-import com.prism.gateway.dto.ChatCompletionResponse;
+import com.prism.gateway.dto.ChatCompletionStreamChunk;
 import com.prism.gateway.routing.DifficultyClassifier;
 import com.prism.gateway.routing.ModelResolver;
 import com.prism.gateway.routing.ProviderRegistry;
 import com.prism.gateway.routing.ProviderResolver;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import tools.jackson.databind.ObjectMapper;
 
-import java.util.ArrayList;
+import java.time.Instant;
 import java.util.List;
 
 
@@ -20,14 +21,16 @@ public class ChatCompletionService {
     private final ModelResolver modelResolver;
     private final ProviderExecutor providerExecutor;
     private final DifficultyClassifier difficultyClassifier;
+    private final ObjectMapper objectMapper;
 
-    public ChatCompletionService(LLMProvider llmProvider, ModelResolver modelResolver, ProviderResolver providerResolver, ProviderRegistry providerRegistry, ProviderExecutor providerExecutor, DifficultyClassifier difficultyClassifier) {
+    public ChatCompletionService(LLMProvider llmProvider, ModelResolver modelResolver, ProviderResolver providerResolver, ProviderRegistry providerRegistry, ProviderExecutor providerExecutor, DifficultyClassifier difficultyClassifier, ObjectMapper objectMapper) {
         this.modelResolver = modelResolver;
         this.providerExecutor = providerExecutor;
         this.difficultyClassifier = difficultyClassifier;
+        this.objectMapper = objectMapper;
     }
 
-    public ChatCompletionResponse complete(
+    public ProviderExecutionResult complete(
             ChatCompletionRequest request
     ){
         ModelAliasConfig modelConfig = modelResolver.resolve(request.model());
@@ -59,4 +62,31 @@ public class ChatCompletionService {
                 modelConfig
         );
     }
+
+    public ProviderStreamResult stream(
+            ChatCompletionRequest request
+    ) {
+
+        ModelAliasConfig modelConfig =
+                modelResolver.resolve(request.model());
+
+        ProviderStreamResult result =
+                providerExecutor.stream(
+                        request,
+                        modelConfig
+                );
+
+        Flux<String> chunks =
+                result.stream();
+
+        Flux<String> finalStream =
+                chunks.concatWithValues("[DONE]");
+
+        return new ProviderStreamResult(
+                finalStream,
+                result.provider(),
+                result.model()
+        );
+    }
+
 }
