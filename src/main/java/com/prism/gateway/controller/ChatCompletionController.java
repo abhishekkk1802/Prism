@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 
 @RestController
@@ -24,35 +25,49 @@ public class ChatCompletionController {
     }
 
 
+//    @PostMapping("/chat/completions")
+//    public Mono<ResponseEntity<ChatCompletionResponse>> chatCompletionResponse(
+//            @Valid @RequestBody ChatCompletionRequest request
+//            ){
+//        ProviderExecutionResult result = chatCompletionService.complete(request).block();
+//
+//        return ResponseEntity.ok()
+//                .header("x-prism-provider", result.provider())
+//                .header("x-prism-model", result.model())
+//                .header("x-prism-request-model", request.model())
+//                .body(result.response());
+//
+//    }
+
     @PostMapping("/chat/completions")
-    public ResponseEntity<ChatCompletionResponse> chatCompletionResponse(
+    public Mono<ResponseEntity<ChatCompletionResponse>> chatCompletionResponse(
             @Valid @RequestBody ChatCompletionRequest request
-            ){
-        ProviderExecutionResult result = chatCompletionService.complete(request);
-
-        return ResponseEntity.ok()
-                .header("x-prism-provider", result.provider())
-                .header("x-prism-model", result.model())
-                .header("x-prism-request-model", request.model())
-                .body(result.response());
-
+    ) {
+        return chatCompletionService.complete(request)
+                .map(result ->
+                        ResponseEntity.ok()
+                                .header("x-prism-provider", result.provider())
+                                .header("x-prism-model", result.model())
+                                .header("x-prism-request-model", request.model())
+                                .body(result.response())
+                );
     }
 
     @PostMapping(
             value = "/chat/completions/stream",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE
     )
-    public ResponseEntity<Flux<String>> chatCompletionStream(
+    public Mono<ResponseEntity<Flux<String>>> chatCompletionStream(
             @Valid @RequestBody ChatCompletionRequest request
     ) {
-        ProviderStreamResult result = chatCompletionService.stream(request);
-
-        return ResponseEntity.ok()
-                .header("x-prism-provider", result.provider())
-                .header("x-prism-model", result.model())
-                .header("x-prism-request-model", request.model())
-                .contentType(MediaType.TEXT_EVENT_STREAM)
-                .body(result.stream());
+        return chatCompletionService.stream(request)
+                .map(result -> ResponseEntity.ok()
+                        .header("x-prism-provider", result.provider())
+                        .header("x-prism-model", result.model())
+                        .header("x-prism-request-model", request.model())
+                        .header("x-prism-fallback", String.valueOf(result.fallback()))
+                        .contentType(MediaType.TEXT_EVENT_STREAM)
+                        .body(result.stream()));
     }
 
     private String extractApiKey(String authorization){

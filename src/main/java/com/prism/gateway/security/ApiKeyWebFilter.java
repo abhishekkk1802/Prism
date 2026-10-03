@@ -1,5 +1,6 @@
 package com.prism.gateway.security;
 
+import com.prism.gateway.service.ApiKeyPolicy;
 import com.prism.gateway.service.ApiKeyService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -38,11 +39,17 @@ public class ApiKeyWebFilter implements WebFilter {
 
         String apiKey = authorization.substring(7);
 
-        if(!apiKeyService.isValid(apiKey)){
+        var policy = apiKeyService.getPolicy(apiKey);
+
+        if (policy.isEmpty()) {
             return unauthorized(exchange);
         }
 
-        return chain.filter(exchange);
+        return chain.filter(exchange)
+                .contextWrite(context ->
+                        context.put(ApiKeyPolicy.class, policy.get())
+                );
+
     }
 
 

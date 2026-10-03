@@ -8,8 +8,7 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-
-import static okio.HashingSink.sha256;
+import java.util.Optional;
 
 @Service
 public class ApiKeyService {
@@ -20,12 +19,26 @@ public class ApiKeyService {
         this.apiKeyRepository = apiKeyRepository;
     }
 
-    public boolean isValid(String apiKey){
-        if(apiKey == null || apiKey.isBlank())return false;
+    public Optional<ApiKeyPolicy> getPolicy(String apiKey){
+        if(apiKey == null || apiKey.isBlank()) return Optional.empty();
 
         String hash = sha256(apiKey);
 
-        return apiKeyRepository.findActiveKey(hash).isPresent();
+        return apiKeyRepository.findActivePolicy(hash);
+    }
+
+    public boolean isValid(String apiKey){
+        return getPolicy(apiKey).isPresent();
+    }
+
+    public boolean isModelAllowed(ApiKeyPolicy policy, String model) {
+
+        if (policy.allowedModels() == null ||
+                policy.allowedModels().isEmpty()) {
+            return true;
+        }
+
+        return policy.allowedModels().contains(model);
     }
 
     private String sha256(String value){

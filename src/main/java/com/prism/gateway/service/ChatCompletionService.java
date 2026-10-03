@@ -9,6 +9,7 @@ import com.prism.gateway.routing.ProviderRegistry;
 import com.prism.gateway.routing.ProviderResolver;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
@@ -22,15 +23,17 @@ public class ChatCompletionService {
     private final ProviderExecutor providerExecutor;
     private final DifficultyClassifier difficultyClassifier;
     private final ObjectMapper objectMapper;
+    private final ApiKeyService apiKeyService;
 
-    public ChatCompletionService(LLMProvider llmProvider, ModelResolver modelResolver, ProviderResolver providerResolver, ProviderRegistry providerRegistry, ProviderExecutor providerExecutor, DifficultyClassifier difficultyClassifier, ObjectMapper objectMapper) {
+    public ChatCompletionService(LLMProvider llmProvider, ModelResolver modelResolver, ProviderResolver providerResolver, ProviderRegistry providerRegistry, ProviderExecutor providerExecutor, DifficultyClassifier difficultyClassifier, ObjectMapper objectMapper, ApiKeyService apiKeyService) {
         this.modelResolver = modelResolver;
         this.providerExecutor = providerExecutor;
         this.difficultyClassifier = difficultyClassifier;
         this.objectMapper = objectMapper;
+        this.apiKeyService = apiKeyService;
     }
 
-    public ProviderExecutionResult complete(
+    public Mono<ProviderExecutionResult> complete(
             ChatCompletionRequest request
     ){
         ModelAliasConfig modelConfig = modelResolver.resolve(request.model());
@@ -57,36 +60,32 @@ public class ChatCompletionService {
                     + routedAlias
             );
         }
-        return providerExecutor.execute(
-                request,
-                modelConfig
+
+        return Mono.just(
+                providerExecutor.execute(
+                        request,
+                        modelConfig
+                )
         );
     }
 
-    public ProviderStreamResult stream(
+    public Mono<ProviderStreamResult> stream(
             ChatCompletionRequest request
     ) {
 
         ModelAliasConfig modelConfig =
                 modelResolver.resolve(request.model());
 
-        ProviderStreamResult result =
-                providerExecutor.stream(
-                        request,
-                        modelConfig
-                );
-
-        Flux<String> chunks =
-                result.stream();
-
-        Flux<String> finalStream =
-                chunks.concatWithValues("[DONE]");
-
-        return new ProviderStreamResult(
-                finalStream,
-                result.provider(),
-                result.model()
-        );
+        return providerExecutor.stream(request, modelConfig)
+                .map(result -> {
+                    Flux<String> finalStream = result.stream().concatWithValues("[DONE]");
+                    return new ProviderStreamResult(
+                            finalStream,
+                            result.provider(),
+                            result.model(),
+                            result.fallback()
+                    );
+                });
     }
 
 }

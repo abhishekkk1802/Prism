@@ -9,6 +9,8 @@ import com.prism.gateway.routing.ProviderRegistry;
 import com.prism.gateway.routing.ProviderResolver;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 @Service
 public class ProviderExecutor {
@@ -61,63 +63,77 @@ public class ProviderExecutor {
         );
     }
 
-
-    public ProviderStreamResult stream(
+    /**
+     * Returns a Mono that resolves to a ProviderStreamResult once the actual
+     * provider is known (i.e. after fallback resolution). This allows the
+     * controller to set accurate response headers before the stream body begins.
+     */
+    public Mono<ProviderStreamResult> stream(
             ChatCompletionRequest request,
             ModelAliasConfig modelConfig
     ) {
-        ProviderStreamResult primary =
-                streamWithRetry(
-                        request,
-                        modelConfig.primary()
-                );
+        // Sink that will be completed with the real provider metadata
+        // (primary or whichever fallback actually serves the request).
+        Sinks.One<ProviderStreamResult> metaSink = Sinks.one();
 
-        Flux<String> streamWithFallback =
-                primary.stream()
-                        .onErrorResume(primaryException -> {
+        ProviderStreamResult primary = streamWithRetry(request, modelConfig.primary());
 
-                            System.out.println(
-                                    "Primary provider streaming failed after retries: "
-                                            + modelConfig.primary()
-                            );
+        // Tag each element from the primary with "not a fallback".
+        Flux<String> taggedPrimary = primary.stream()
+                .doOnNext(ignored -> metaSink.tryEmitValue(
+                        new ProviderStreamResult(null, primary.provider(), primary.model(), false)
+                ));
 
-                            primaryException.printStackTrace();
+        Flux<String> streamWithFallback = taggedPrimary
+                .onErrorResume(primaryException -> {
 
-                            if (modelConfig.fallbacks() == null ||
-                                    modelConfig.fallbacks().isEmpty()) {
+                    System.out.println(
+                            "Primary provider streaming failed after retries: "
+                                    + modelConfig.primary()
+                    );
+                    primaryException.printStackTrace();
 
-                                return Flux.error(
-                                        new IllegalStateException(
-                                                "All providers failed for model: "
-                                                        + request.model(),
-                                                primaryException
-                                        )
-                                );
-                            }
+                    if (modelConfig.fallbacks() == null || modelConfig.fallbacks().isEmpty()) {
+                        metaSink.tryEmitError(primaryException);
+                        return Flux.error(new IllegalStateException(
+                                "All providers failed for model: " + request.model(),
+                                primaryException
+                        ));
+                    }
 
-                            return streamFallbacks(
-                                    request,
-                                    modelConfig.fallbacks(),
-                                    0,
-                                    primaryException
-                            );
-                        });
+                    return streamFallbacks(request, modelConfig.fallbacks(), 0, primaryException, metaSink);
+                });
 
-        return new ProviderStreamResult(
-                streamWithFallback,
-                primary.provider(),
-                primary.model()
+        // Resolve metadata from the first element, then replay the full stream.
+        Sinks.Many<String> replaySink = Sinks.many().replay().all();
+        streamWithFallback.subscribe(
+                token -> replaySink.tryEmitNext(token),
+                error -> {
+                    metaSink.tryEmitError(error);
+                    replaySink.tryEmitError(error);
+                },
+                () -> replaySink.tryEmitComplete()
         );
+
+        return metaSink.asMono()
+                .map(meta -> new ProviderStreamResult(
+                        replaySink.asFlux(),
+                        meta.provider(),
+                        meta.model(),
+                        meta.fallback()
+                ));
     }
 
     private Flux<String> streamFallbacks(
             ChatCompletionRequest request,
             java.util.List<String> fallbacks,
             int index,
-            Throwable previousException
+            Throwable previousException,
+            Sinks.One<ProviderStreamResult> metaSink
     ) {
 
         if (index >= fallbacks.size()) {
+            metaSink.tryEmitError(previousException);
             return Flux.error(
                     new IllegalStateException(
                             "All providers failed for model: "
@@ -129,49 +145,30 @@ public class ProviderExecutor {
 
         String fallbackModel = fallbacks.get(index);
 
-        System.out.println(
-                "Switching to fallback model: "
-                        + fallbackModel
-        );
+        System.out.println("Switching to fallback model: " + fallbackModel);
 
         ProviderStreamResult fallback;
 
         try {
-            fallback = streamWithRetry(
-                    request,
-                    fallbackModel
-            );
+            fallback = streamWithRetry(request, fallbackModel);
         } catch (Exception exception) {
 
-            System.out.println(
-                    "Failed to start fallback model: "
-                            + fallbackModel
-            );
+            System.out.println("Failed to start fallback model: " + fallbackModel);
 
-            return streamFallbacks(
-                    request,
-                    fallbacks,
-                    index + 1,
-                    exception
-            );
+            return streamFallbacks(request, fallbacks, index + 1, exception, metaSink);
         }
 
+        // Tag elements from this fallback with its metadata.
         return fallback.stream()
+                .doOnNext(ignored -> metaSink.tryEmitValue(
+                        new ProviderStreamResult(null, fallback.provider(), fallback.model(), true)
+                ))
                 .onErrorResume(exception -> {
 
-                    System.out.println(
-                            "Fallback model failed: "
-                                    + fallbackModel
-                    );
-
+                    System.out.println("Fallback model failed: " + fallbackModel);
                     exception.printStackTrace();
 
-                    return streamFallbacks(
-                            request,
-                            fallbacks,
-                            index + 1,
-                            exception
-                    );
+                    return streamFallbacks(request, fallbacks, index + 1, exception, metaSink);
                 });
     }
 
@@ -223,7 +220,8 @@ public class ProviderExecutor {
             return new ProviderStreamResult(
                     retriedStream,
                     result.provider(),
-                    result.model()
+                    result.model(),
+                    false
             );
 
         } catch (Exception exception) {
@@ -255,7 +253,8 @@ public class ProviderExecutor {
         return new ProviderStreamResult(
                 stream,
                 providerName,
-                model
+                model,
+                false
         );
     }
 
