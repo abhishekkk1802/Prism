@@ -32,6 +32,7 @@ public class RequestLogService {
             BigDecimal costUsd,
             boolean cacheHit,
             boolean fallback,
+            int retries,
             long latencyMs
     ) {
         repository.insert(new RequestLog(
@@ -49,7 +50,7 @@ public class RequestLogService {
                 costUsd,
                 cacheHit,
                 fallback,
-                0,
+                retries,
                 latencyMs,
                 null
         ));

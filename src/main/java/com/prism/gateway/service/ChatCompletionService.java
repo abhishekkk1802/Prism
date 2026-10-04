@@ -145,7 +145,8 @@ public class ChatCompletionService {
                                     request.model(), resolvedTier, resolvedReason,
                                     result.provider(), result.model(),
                                     result.inputTokens(), result.outputTokens(),
-                                    result.costUsd(), result.cacheHit(), false,
+                                    result.costUsd(), result.cacheHit(), result.fallback(),
+                                    result.retries(),
                                     System.currentTimeMillis() - startTime
                             );
                         })
@@ -227,6 +228,7 @@ public class ChatCompletionService {
                                                     result.provider(), result.model(),
                                                     0, 0, BigDecimal.ZERO,
                                                     false, result.fallback(),
+                                                    0,
                                                     System.currentTimeMillis() - startTime
                                             )
                                     )

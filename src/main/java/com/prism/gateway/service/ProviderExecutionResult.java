@@ -11,6 +11,8 @@ public record ProviderExecutionResult(
         long inputTokens,
         long outputTokens,
         BigDecimal costUsd,
-        boolean cacheHit
+        boolean cacheHit,
+        boolean fallback,
+        int retries
 ) {
 }

@@ -21,39 +21,46 @@ public class ProviderExecutor {
     private final ProviderResolver providerResolver;
     private final GatewayConfig gatewayConfig;
     private final CostCalculator costCalculator;
+    private final ProviderRetryPolicy retryPolicy;
 
 
-    public ProviderExecutor(LLMProvider llmProvider, ProviderRegistry providerRegistry, ProviderResolver providerResolver, GatewayConfig gatewayConfig, CostCalculator costCalculator) {
+    public ProviderExecutor(LLMProvider llmProvider, ProviderRegistry providerRegistry, ProviderResolver providerResolver, GatewayConfig gatewayConfig, CostCalculator costCalculator, ProviderRetryPolicy retryPolicy) {
         this.llmProvider = llmProvider;
         this.providerRegistry = providerRegistry;
         this.providerResolver = providerResolver;
         this.gatewayConfig = gatewayConfig;
         this.costCalculator = costCalculator;
+        this.retryPolicy = retryPolicy;
     }
 
     public ProviderExecutionResult execute(
             ChatCompletionRequest request,
             ModelAliasConfig modelConfig
     ){
-        try{
-            return executeWithRetry(
-                    request,
-                    modelConfig.primary()
-            );
-        } catch (Exception primaryException){
+        int totalAttempts = 0;
+
+        // Try primary with retry tracking
+        try {
+            ProviderExecutionResult result = executeWithRetry(request, modelConfig.primary(), false);
+            totalAttempts += result.retries();
+            // rebuild with accurate total retries
+            return withRetries(result, totalAttempts);
+        } catch (Exception primaryException) {
+            // count all attempts against the primary (max_attempts = retries + 1 failed)
+            totalAttempts += gatewayConfig.retry().max_attempts();
             System.out.println("Primary provider failed:");
             primaryException.printStackTrace();
         }
 
-        if(modelConfig.fallbacks()!=null){
-            for(String fallbackModel : modelConfig.fallbacks()){
-
+        // Try each fallback
+        if (modelConfig.fallbacks() != null) {
+            for (String fallbackModel : modelConfig.fallbacks()) {
                 try {
-                    return executeWithRetry(
-                            request,
-                            fallbackModel
-                    );
-                } catch (Exception fallbackException){
+                    ProviderExecutionResult result = executeWithRetry(request, fallbackModel, true);
+                    totalAttempts += result.retries();
+                    return withRetries(result, totalAttempts);
+                } catch (Exception fallbackException) {
+                    totalAttempts += gatewayConfig.retry().max_attempts();
                     System.out.println("Fallback provider failed:");
                     fallbackException.printStackTrace();
                 }
@@ -61,8 +68,16 @@ public class ProviderExecutor {
         }
 
         throw new IllegalStateException(
-                "All providers failed for model: "
-                + request.model()
+                "All providers failed for model: " + request.model()
+        );
+    }
+
+    /** Rebuilds the result with a corrected total retry count. */
+    private ProviderExecutionResult withRetries(ProviderExecutionResult r, int retries) {
+        return new ProviderExecutionResult(
+                r.response(), r.provider(), r.model(),
+                r.inputTokens(), r.outputTokens(), r.costUsd(),
+                r.cacheHit(), r.fallback(), retries
         );
     }
 
@@ -263,38 +278,47 @@ public class ProviderExecutor {
 
     private ProviderExecutionResult executeWithRetry(
             ChatCompletionRequest request,
-            String model
+            String model,
+            boolean isFallback
     ) {
 
         int maxAttempts = gatewayConfig.retry().max_attempts();
-        long backoffMs =
-                gatewayConfig.retry().initial_backoff_ms();
-        double multiplier =
-                gatewayConfig.retry().backoff_multiplier();
+        long backoffMs = gatewayConfig.retry().initial_backoff_ms();
+        double multiplier = gatewayConfig.retry().backoff_multiplier();
 
         Exception lastException = null;
+        int attempts = 0;
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-
+            attempts = attempt;
             try {
                 System.out.println(
-                        "Attempt " + attempt
-                                + "/" + maxAttempts
-                                + " for model " + model
+                        "Attempt " + attempt + "/" + maxAttempts + " for model " + model
                 );
-                return executeWithModel(
-                        request,
-                        model
+                ProviderExecutionResult base = executeWithModel(request, model);
+                // Rebuild with accurate fallback flag and retry count (attempts - 1 = retries)
+                return new ProviderExecutionResult(
+                        base.response(),
+                        base.provider(),
+                        base.model(),
+                        base.inputTokens(),
+                        base.outputTokens(),
+                        base.costUsd(),
+                        base.cacheHit(),
+                        isFallback,
+                        attempt - 1
                 );
             } catch (Exception exception) {
                 lastException = exception;
                 System.out.println(
-                        "Attempt " + attempt
-                                + " failed for "
-                                + model
-                                + ": "
-                                + exception.getMessage()
+                        "Attempt " + attempt + " failed for " + model + ": " + exception.getMessage()
                 );
+                if (!retryPolicy.isRetryable(exception)) {
+                    System.out.println(
+                            "Non-retryable provider failure. Stopping retries for " + model
+                    );
+                    break;
+                }
                 if (attempt == maxAttempts) {
                     break;
                 }
@@ -302,20 +326,14 @@ public class ProviderExecutor {
                     Thread.sleep(backoffMs);
                 } catch (InterruptedException interruptedException) {
                     Thread.currentThread().interrupt();
-                    throw new IllegalStateException(
-                            "Retry interrupted",
-                            interruptedException
-                    );
+                    throw new IllegalStateException("Retry interrupted", interruptedException);
                 }
-                backoffMs =
-                        (long) (backoffMs * multiplier);
+                backoffMs = (long) (backoffMs * multiplier);
             }
         }
 
         throw new IllegalStateException(
-                "Provider failed after "
-                        + maxAttempts
-                        + " attempts",
+                "Provider failed after " + attempts + " attempts",
                 lastException
         );
     }
@@ -351,7 +369,9 @@ public class ProviderExecutor {
                 inputTokens,
                 outputTokens,
                 costUsd,
-                false
+                false,
+                false,
+                0
         );
     }
 }
