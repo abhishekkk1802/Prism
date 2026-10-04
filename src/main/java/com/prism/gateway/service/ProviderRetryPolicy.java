@@ -1,5 +1,8 @@
 package com.prism.gateway.service;
 
+import com.openai.errors.OpenAIIoException;
+import com.openai.errors.OpenAIRetryableException;
+import com.openai.errors.OpenAIServiceException;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -12,48 +15,46 @@ public class ProviderRetryPolicy {
 
     public boolean isRetryable(Throwable error) {
 
-        Throwable cause = unwrap(error);
+        // Walk the full cause chain once, checking each level
+        Throwable current = error;
+        while (current != null) {
 
-        // Network / connection failures
-        if (cause instanceof IOException
-                || cause instanceof ConnectException
-                || cause instanceof SocketTimeoutException
-                || cause instanceof TimeoutException) {
-            return true;
-        }
+            // SDK explicit retryable marker
+            if (current instanceof OpenAIRetryableException) {
+                return true;
+            }
 
-        // HTTP status based failures
-        Integer status = extractHttpStatus(cause);
+            // SDK IO / network failure
+            if (current instanceof OpenAIIoException) {
+                return true;
+            }
 
-        if (status != null) {
-            return status == 429
-                    || status == 500
-                    || status == 502
-                    || status == 503
-                    || status == 504;
+            // SDK HTTP error — check status code
+            if (current instanceof OpenAIServiceException httpEx) {
+                int status = httpEx.statusCode();
+                return status == 429
+                        || status == 500
+                        || status == 502
+                        || status == 503
+                        || status == 504;
+            }
+
+            // Raw network / connection failures
+            if (current instanceof ConnectException
+                    || current instanceof SocketTimeoutException
+                    || current instanceof TimeoutException) {
+                return true;
+            }
+
+            // Generic IO (catches remaining network issues)
+            if (current instanceof IOException) {
+                return true;
+            }
+
+            Throwable cause = current.getCause();
+            current = (cause != current) ? cause : null;
         }
 
         return false;
-    }
-
-    private Throwable unwrap(Throwable error) {
-
-        Throwable current = error;
-
-        while (current.getCause() != null
-                && current.getCause() != current) {
-
-            current = current.getCause();
-        }
-
-        return current;
-    }
-
-    private Integer extractHttpStatus(Throwable error) {
-
-        // We will add provider-SDK-specific status extraction
-        // here when needed.
-
-        return null;
     }
 }
