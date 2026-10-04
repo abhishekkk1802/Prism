@@ -12,3 +12,4 @@ CREATE TABLE IF NOT EXISTS prism.usage_monthly (
     CONSTRAINT usage_monthly_key_month_unique
         UNIQUE (key_id, month)
 );
+isModelAllowed

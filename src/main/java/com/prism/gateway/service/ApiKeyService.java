@@ -37,6 +37,13 @@ public class ApiKeyService {
                 policy.allowedModels().isEmpty()) {
             return true;
         }
+        // "auto" is a routing alias.
+        // It is allowed only when the key can access
+        // all tiers that auto may route to.
+        if ("auto".equals(model)) {
+            return policy.allowedModels().contains("fast")
+                    && policy.allowedModels().contains("smart");
+        }
 
         return policy.allowedModels().contains(model);
     }
