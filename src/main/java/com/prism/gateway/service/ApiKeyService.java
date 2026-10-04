@@ -64,4 +64,15 @@ public class ApiKeyService {
             );
         }
     }
+
+    public Optional<ApiKeyDetails> getActiveKey(String apiKey) {
+
+        if (apiKey == null || apiKey.isBlank()) {
+            return Optional.empty();
+        }
+
+        String hash = sha256(apiKey);
+
+        return apiKeyRepository.findActiveKeyDetails(hash);
+    }
 }

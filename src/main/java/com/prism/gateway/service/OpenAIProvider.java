@@ -61,12 +61,21 @@ public class OpenAIProvider implements LLMProvider {
                         "stop"
                 );
 
+        long inputTokens = completion.usage()
+                .map(u -> u.promptTokens())
+                .orElse(0L);
+
+        long outputTokens = completion.usage()
+                .map(u -> u.completionTokens())
+                .orElse(0L);
+
         return new ChatCompletionResponse(
                 "chatcmpl-prism-" + System.currentTimeMillis(),
                 "chat.completion",
                 Instant.now().getEpochSecond(),
                 request.model(),
-                List.of(choice)
+                List.of(choice),
+                new ChatCompletionResponse.Usage(inputTokens, outputTokens)
         );
     }
 

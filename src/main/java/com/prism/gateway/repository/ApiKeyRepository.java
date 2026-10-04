@@ -1,5 +1,6 @@
 package com.prism.gateway.repository;
 
+import com.prism.gateway.service.ApiKeyDetails;
 import com.prism.gateway.service.ApiKeyPolicy;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -60,6 +61,25 @@ public class ApiKeyRepository {
                 },
                 keyHash
         );
+    }
+
+    public Optional<ApiKeyDetails> findActiveKeyDetails(String keyHash) {
+
+        String sql = """
+            SELECT id, rpm_limit
+            FROM prism.api_keys
+            WHERE key_hash = ?
+              AND active = true
+            """;
+
+        return jdbcTemplate.query(
+                sql,
+                (rs, rowNum) -> new ApiKeyDetails(
+                        UUID.fromString(rs.getString("id")),
+                        rs.getInt("rpm_limit")
+                ),
+                keyHash
+        ).stream().findFirst();
     }
 
 }

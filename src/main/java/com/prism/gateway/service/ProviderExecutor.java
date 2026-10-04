@@ -8,6 +8,7 @@ import com.prism.gateway.dto.ChatCompletionResponse;
 import com.prism.gateway.routing.ProviderRegistry;
 import com.prism.gateway.routing.ProviderResolver;
 import org.springframework.stereotype.Service;
+import com.prism.gateway.service.CostCalculator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -19,13 +20,15 @@ public class ProviderExecutor {
     private final ProviderRegistry providerRegistry;
     private final ProviderResolver providerResolver;
     private final GatewayConfig gatewayConfig;
+    private final CostCalculator costCalculator;
 
 
-    public ProviderExecutor(LLMProvider llmProvider, ProviderRegistry providerRegistry, ProviderResolver providerResolver, GatewayConfig gatewayConfig) {
+    public ProviderExecutor(LLMProvider llmProvider, ProviderRegistry providerRegistry, ProviderResolver providerResolver, GatewayConfig gatewayConfig, CostCalculator costCalculator) {
         this.llmProvider = llmProvider;
         this.providerRegistry = providerRegistry;
         this.providerResolver = providerResolver;
         this.gatewayConfig = gatewayConfig;
+        this.costCalculator = costCalculator;
     }
 
     public ProviderExecutionResult execute(
@@ -321,7 +324,7 @@ public class ProviderExecutor {
 
     private ProviderExecutionResult executeWithModel(ChatCompletionRequest request, String model) {
 
-        String  providerName = providerResolver.resolveProvider(model);
+        String providerName = providerResolver.resolveProvider(model);
 
         ProviderConfig provider = providerRegistry.getProvider(providerName);
 
@@ -331,10 +334,24 @@ public class ProviderExecutor {
                 model
         );
 
+        long inputTokens = response.usage() != null ? response.usage().inputTokens() : 0L;
+        long outputTokens = response.usage() != null ? response.usage().outputTokens() : 0L;
+
+        java.math.BigDecimal costUsd;
+        try {
+            costUsd = costCalculator.calculate(model, inputTokens, outputTokens);
+        } catch (Exception e) {
+            costUsd = java.math.BigDecimal.ZERO;
+        }
+
         return new ProviderExecutionResult(
-          response,
-          providerName,
-          model
+                response,
+                providerName,
+                model,
+                inputTokens,
+                outputTokens,
+                costUsd,
+                false
         );
     }
 }

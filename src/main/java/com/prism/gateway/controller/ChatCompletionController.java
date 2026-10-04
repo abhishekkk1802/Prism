@@ -49,6 +49,7 @@ public class ChatCompletionController {
                                 .header("x-prism-provider", result.provider())
                                 .header("x-prism-model", result.model())
                                 .header("x-prism-request-model", request.model())
+                                .header("x-prism-cost-usd", result.costUsd() != null ? result.costUsd().toPlainString() : "")
                                 .body(result.response())
                 );
     }
