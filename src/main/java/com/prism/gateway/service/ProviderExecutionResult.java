@@ -13,6 +13,7 @@ public record ProviderExecutionResult(
         BigDecimal costUsd,
         boolean cacheHit,
         boolean fallback,
-        int retries
+        int retries,
+        double cacheSimilarity
 ) {
 }

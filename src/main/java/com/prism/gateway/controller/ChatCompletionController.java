@@ -25,20 +25,6 @@ public class ChatCompletionController {
     }
 
 
-//    @PostMapping("/chat/completions")
-//    public Mono<ResponseEntity<ChatCompletionResponse>> chatCompletionResponse(
-//            @Valid @RequestBody ChatCompletionRequest request
-//            ){
-//        ProviderExecutionResult result = chatCompletionService.complete(request).block();
-//
-//        return ResponseEntity.ok()
-//                .header("x-prism-provider", result.provider())
-//                .header("x-prism-model", result.model())
-//                .header("x-prism-request-model", request.model())
-//                .body(result.response());
-//
-//    }
-
     @PostMapping("/chat/completions")
     public Mono<ResponseEntity<ChatCompletionResponse>> chatCompletionResponse(
             @Valid @RequestBody ChatCompletionRequest request
@@ -50,6 +36,9 @@ public class ChatCompletionController {
                                 .header("x-prism-model", result.model())
                                 .header("x-prism-request-model", request.model())
                                 .header("x-prism-cost-usd", result.costUsd() != null ? result.costUsd().toPlainString() : "")
+                                .header("x-prism-cache", result.cacheHit() ? "hit" : "miss")
+                                .header("x-prism-cache-similarity",
+                                        result.cacheHit() ? String.format("%.4f", result.cacheSimilarity()) : "")
                                 .body(result.response())
                 );
     }

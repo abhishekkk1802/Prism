@@ -1,5 +1,6 @@
 package com.prism.gateway.service;
 
+import com.prism.gateway.cache.SemanticCacheService;
 import com.prism.gateway.config.model.ModelAliasConfig;
 import com.prism.gateway.dto.ChatCompletionRequest;
 import com.prism.gateway.exception.BudgetExceededException;
@@ -8,12 +9,9 @@ import com.prism.gateway.exception.RateLimitExceededException;
 import com.prism.gateway.logging.RequestLogService;
 import com.prism.gateway.routing.DifficultyClassifier;
 import com.prism.gateway.routing.ModelResolver;
-import com.prism.gateway.routing.ProviderRegistry;
-import com.prism.gateway.routing.ProviderResolver;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -24,36 +22,30 @@ public class ChatCompletionService {
     private final ModelResolver modelResolver;
     private final ProviderExecutor providerExecutor;
     private final DifficultyClassifier difficultyClassifier;
-    private final ObjectMapper objectMapper;
     private final ApiKeyService apiKeyService;
     private final RateLimitService rateLimitService;
     private final BudgetAdmissionService budgetAdmissionService;
-    private final CostCalculator costCalculator;
     private final RequestLogService requestLogService;
+    private final SemanticCacheService semanticCacheService;
 
     public ChatCompletionService(
-            LLMProvider llmProvider,
             ModelResolver modelResolver,
-            ProviderResolver providerResolver,
-            ProviderRegistry providerRegistry,
             ProviderExecutor providerExecutor,
             DifficultyClassifier difficultyClassifier,
-            ObjectMapper objectMapper,
             ApiKeyService apiKeyService,
             RateLimitService rateLimitService,
             BudgetAdmissionService budgetAdmissionService,
-            CostCalculator costCalculator,
-            RequestLogService requestLogService
+            RequestLogService requestLogService,
+            SemanticCacheService semanticCacheService
     ) {
         this.modelResolver = modelResolver;
         this.providerExecutor = providerExecutor;
         this.difficultyClassifier = difficultyClassifier;
-        this.objectMapper = objectMapper;
         this.apiKeyService = apiKeyService;
         this.rateLimitService = rateLimitService;
         this.budgetAdmissionService = budgetAdmissionService;
-        this.costCalculator = costCalculator;
         this.requestLogService = requestLogService;
+        this.semanticCacheService = semanticCacheService;
     }
 
     public Mono<ProviderExecutionResult> complete(ChatCompletionRequest request) {
@@ -132,7 +124,42 @@ public class ChatCompletionService {
                 final String resolvedTier = chosenTier;
                 final String resolvedReason = routingReason;
 
-                // 5. Execute and log
+                // 5. Semantic cache lookup (per-key, scoped to the RESOLVED tier
+                //    so an auto->fast request cannot be served by an auto->smart entry)
+                boolean cacheEnabled = Boolean.TRUE.equals(policy.cacheEnabled());
+                if (cacheEnabled) {
+                    double threshold = policy.cacheSimilarityThreshold() != null
+                            ? policy.cacheSimilarityThreshold().doubleValue()
+                            : 0.95d;
+
+                    var hit = semanticCacheService.lookup(
+                            policy.id(), resolvedTier, request, threshold
+                    );
+
+                    if (hit.isPresent()) {
+                        SemanticCacheService.CacheHit cacheHit = hit.get();
+                        // Cache hit: zero provider-token cost, no budget settle.
+                        requestLogService.logSuccess(
+                                policy.id(), requestId,
+                                request.model(), resolvedTier, "cache_hit",
+                                "cache", resolvedTier,
+                                0, 0, BigDecimal.ZERO, true, false, 0,
+                                System.currentTimeMillis() - startTime
+                        );
+                        return Mono.just(new ProviderExecutionResult(
+                                cacheHit.response(),
+                                "cache",
+                                resolvedTier,
+                                0, 0, BigDecimal.ZERO,
+                                true,   // cacheHit
+                                false,  // fallback
+                                0,      // retries
+                                cacheHit.similarity()
+                        ));
+                    }
+                }
+
+                // 6. Execute, log, and store in cache
                 return Mono.fromCallable(() -> providerExecutor.execute(request, resolvedConfig))
                         .doOnNext(result -> {
                             budgetAdmissionService.settle(
@@ -149,6 +176,14 @@ public class ChatCompletionService {
                                     result.retries(),
                                     System.currentTimeMillis() - startTime
                             );
+                            // Store successful response under the RESOLVED tier
+                            if (cacheEnabled && result.response() != null) {
+                                semanticCacheService.store(
+                                        policy.id(), resolvedTier, request,
+                                        result.response(),
+                                        result.inputTokens(), result.outputTokens()
+                                );
+                            }
                         })
                         .onErrorResume(e -> {
                             requestLogService.logError(

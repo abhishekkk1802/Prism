@@ -77,7 +77,7 @@ public class ProviderExecutor {
         return new ProviderExecutionResult(
                 r.response(), r.provider(), r.model(),
                 r.inputTokens(), r.outputTokens(), r.costUsd(),
-                r.cacheHit(), r.fallback(), retries
+                r.cacheHit(), r.fallback(), retries, r.cacheSimilarity()
         );
     }
 
@@ -306,7 +306,8 @@ public class ProviderExecutor {
                         base.costUsd(),
                         base.cacheHit(),
                         isFallback,
-                        attempt - 1
+                        attempt - 1,
+                        base.cacheSimilarity()
                 );
             } catch (Exception exception) {
                 lastException = exception;
@@ -371,7 +372,8 @@ public class ProviderExecutor {
                 costUsd,
                 false,
                 false,
-                0
+                0,
+                0.0d
         );
     }
 }
