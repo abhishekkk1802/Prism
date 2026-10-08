@@ -1,0 +1,50 @@
+{
+  "_comment": "OpenRouter-backed config. The openrouter provider's api_key is injected from the OPENROUTER_API_KEY environment variable (never commit a real key). The 'models' map translates the gateway's provider-tier names to real OpenRouter model ids. Mock alpha/beta are kept as fallbacks so a provider outage still yields a response. Use via: PRISM_GATEWAY_CONFIG_PATH=$(pwd)/gateway-config.openrouter.json OPENROUTER_API_KEY=sk-or-... ./gradlew bootRun",
+  "providers": [
+    {
+      "name": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "models": {
+        "openrouter-small": "openai/gpt-4o-mini",
+        "openrouter-large": "openai/gpt-4o"
+      }
+    },
+    {
+      "name": "alpha",
+      "base_url": "http://localhost:9001/v1",
+      "api_key": "mock-key-alpha"
+    },
+    {
+      "name": "beta",
+      "base_url": "http://localhost:9002/v1",
+      "api_key": "mock-key-beta"
+    }
+  ],
+  "model_aliases": {
+    "fast": {
+      "primary": "openrouter-small",
+      "fallbacks": [
+        "alpha-small"
+      ]
+    },
+    "smart": {
+      "primary": "openrouter-large",
+      "fallbacks": [
+        "alpha-large"
+      ]
+    },
+    "auto": {
+      "_comment": "smart router: classifies prompt difficulty and routes to a tier",
+      "route_by_difficulty": {
+        "simple": "fast",
+        "complex": "smart"
+      }
+    }
+  },
+  "retry": {
+    "max_attempts": 3,
+    "initial_backoff_ms": 200,
+    "backoff_multiplier": 2
+  }
+}

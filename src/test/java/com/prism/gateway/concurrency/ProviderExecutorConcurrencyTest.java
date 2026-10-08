@@ -6,6 +6,7 @@ import com.prism.gateway.config.model.ProviderConfig;
 import com.prism.gateway.config.model.RetryConfig;
 import com.prism.gateway.dto.ChatCompletionRequest;
 import com.prism.gateway.dto.ChatCompletionResponse;
+import com.prism.gateway.metrics.PrismMetrics;
 import com.prism.gateway.routing.ProviderRegistry;
 import com.prism.gateway.routing.ProviderResolver;
 import com.prism.gateway.service.CostCalculator;
@@ -13,6 +14,7 @@ import com.prism.gateway.service.LLMProvider;
 import com.prism.gateway.service.ProviderExecutionResult;
 import com.prism.gateway.service.ProviderExecutor;
 import com.prism.gateway.service.ProviderRetryPolicy;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -93,7 +95,8 @@ class ProviderExecutorConcurrencyTest {
                 return new BigDecimal("0.000100");
             }
         };
-        return new ProviderExecutor(provider, registry, resolver, cfg, cost, new ProviderRetryPolicy());
+        PrismMetrics metrics = new PrismMetrics(new SimpleMeterRegistry());
+        return new ProviderExecutor(provider, registry, resolver, cfg, cost, new ProviderRetryPolicy(), metrics);
     }
 
     @Test

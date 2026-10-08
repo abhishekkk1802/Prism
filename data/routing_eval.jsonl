@@ -1,0 +1,20 @@
+{"id": 1, "prompt": "Prove that this distributed algorithm is correct.", "expected": "complex"}
+{"id": 2, "prompt": "Find this race condition in the following Java code and explain the fix.", "expected": "complex"}
+{"id": 3, "prompt": "Compare the consistency models used in distributed databases.", "expected": "complex"}
+{"id": 4, "prompt": "Design a caching architecture for a high-traffic service.", "expected": "complex"}
+{"id": 5, "prompt": "Why does this deadlock occur, and can you prove the fix actually works?", "expected": "complex"}
+{"id": 6, "prompt": "Design a system that keeps consistency while maintaining high availability under network partitions.", "expected": "complex"}
+{"id": 7, "prompt": "There's a memory leak in this service, please find the root cause.", "expected": "complex"}
+{"id": 8, "prompt": "Explain the CAP theorem trade-offs for this system design.", "expected": "complex"}
+{"id": 9, "prompt": "Design an idempotent payment API while keeping backward compatibility.", "expected": "complex"}
+{"id": 10, "prompt": "Analyze this distributed transaction deadlock and prove why it occurs.", "expected": "complex"}
+{"id": 11, "prompt": "This microservice occasionally hangs under load; diagnose the deadlock.", "expected": "complex"}
+{"id": 12, "prompt": "What is a message queue?", "expected": "simple"}
+{"id": 13, "prompt": "Extract the names from this list.", "expected": "simple"}
+{"id": 14, "prompt": "Rewrite this email politely.", "expected": "simple"}
+{"id": 15, "prompt": "Summarize this article in two sentences.", "expected": "simple"}
+{"id": 16, "prompt": "Classify this text as positive or negative.", "expected": "simple"}
+{"id": 17, "prompt": "Return the JSON fields for this object.", "expected": "simple"}
+{"id": 18, "prompt": "Here is a long roster of 200 employees with their departments and start dates. Find employee 42's email address.", "expected": "simple"}
+{"id": 19, "prompt": "Translate this sentence into French.", "expected": "simple"}
+{"id": 20, "prompt": "List the capitals of five European countries.", "expected": "simple"}

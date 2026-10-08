@@ -4,6 +4,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +29,21 @@ public class OpsMetricsRepository {
 
     /** Overall aggregate metrics for a key within the last {@code hours}. */
     public OverallMetrics overall(UUID keyId, int hours) {
+        return overallBetween(keyId, "created_at >= NOW() - make_interval(hours => ?)", hours);
+    }
+
+    /**
+     * Overall aggregate metrics for a key within an explicit [from, to]
+     * timestamp range (used by the admin usage API, which takes from/to
+     * instead of a trailing-hours window). Reuses the exact same aggregate
+     * SELECT shape as {@link #overall(UUID, int)}.
+     */
+    public OverallMetrics overallBetween(UUID keyId, Instant from, Instant to) {
+        return overallBetween(keyId, "created_at >= ? AND created_at <= ?",
+                Timestamp.from(from), Timestamp.from(to));
+    }
+
+    private OverallMetrics overallBetween(UUID keyId, String timeCondition, Object... timeArgs) {
         String sql = """
                 SELECT
                     COUNT(*)                                                   AS total,
@@ -42,8 +59,11 @@ public class OpsMetricsRepository {
                     COUNT(*) FILTER (WHERE cache_hit)                          AS cache_hits
                 FROM prism.request_logs
                 WHERE key_id = ?
-                  AND created_at >= NOW() - make_interval(hours => ?)
-                """;
+                  AND\s""" + timeCondition;
+
+        Object[] args = new Object[1 + timeArgs.length];
+        args[0] = keyId;
+        System.arraycopy(timeArgs, 0, args, 1, timeArgs.length);
 
         return jdbcTemplate.query(sql, rs -> {
             if (!rs.next()) {
@@ -62,7 +82,49 @@ public class OpsMetricsRepository {
                     rs.getBigDecimal("total_cost"),
                     rs.getLong("cache_hits")
             );
-        }, keyId, hours);
+        }, args);
+    }
+
+    /**
+     * Usage/cost broken down by day, provider, or model, within [from, to].
+     * Backs GET /admin/usage/breakdown?groupBy=provider|model|day.
+     */
+    public List<BreakdownRow> breakdown(UUID keyId, String groupBy, Instant from, Instant to) {
+        String groupExpr = switch (groupBy) {
+            case "provider" -> "COALESCE(provider, 'unknown')";
+            case "model" -> "requested_model";
+            case "day" -> "TO_CHAR(created_at, 'YYYY-MM-DD')";
+            default -> throw new IllegalArgumentException("Unsupported groupBy: " + groupBy);
+        };
+
+        String sql = """
+                SELECT
+                    %s AS bucket,
+                    COUNT(*)                                       AS requests,
+                    COALESCE(SUM(input_tokens), 0)                 AS input_tokens,
+                    COALESCE(SUM(output_tokens), 0)                AS output_tokens,
+                    COALESCE(SUM(cost_usd), 0)                     AS total_cost,
+                    COUNT(*) FILTER (WHERE cache_hit)              AS cache_hits
+                FROM prism.request_logs
+                WHERE key_id = ?
+                  AND created_at >= ?
+                  AND created_at <= ?
+                GROUP BY bucket
+                ORDER BY bucket
+                """.formatted(groupExpr);
+
+        List<BreakdownRow> out = new ArrayList<>();
+        jdbcTemplate.query(sql, rs -> {
+            out.add(new BreakdownRow(
+                    rs.getString("bucket"),
+                    rs.getLong("requests"),
+                    rs.getLong("input_tokens"),
+                    rs.getLong("output_tokens"),
+                    rs.getBigDecimal("total_cost"),
+                    rs.getLong("cache_hits")
+            ));
+        }, keyId, Timestamp.from(from), Timestamp.from(to));
+        return out;
     }
 
     /** Metrics grouped by provider (the provider that actually served). */
@@ -163,6 +225,34 @@ public class OpsMetricsRepository {
         return out;
     }
 
+    /**
+     * Same as {@link #recentActivityByProvider(UUID, int)} but across ALL
+     * keys (used by the admin-wide GET /admin/providers/health, which is a
+     * platform-level view rather than scoped to one team).
+     */
+    public List<ProviderActivity> recentActivityByProviderAllKeys(int hours) {
+        String sql = """
+                SELECT
+                    provider,
+                    COUNT(*) FILTER (WHERE status = 'success') AS successful,
+                    COUNT(*) FILTER (WHERE status = 'error')   AS failed
+                FROM prism.request_logs
+                WHERE provider IS NOT NULL
+                  AND created_at >= NOW() - make_interval(hours => ?)
+                GROUP BY provider
+                """;
+
+        List<ProviderActivity> out = new ArrayList<>();
+        jdbcTemplate.query(sql, rs -> {
+            out.add(new ProviderActivity(
+                    rs.getString("provider"),
+                    rs.getLong("successful"),
+                    rs.getLong("failed")
+            ));
+        }, hours);
+        return out;
+    }
+
     // ---- aggregate projections ------------------------------------------------
 
     public record OverallMetrics(
@@ -207,5 +297,14 @@ public class OpsMetricsRepository {
             String provider,
             long successful,
             long failed
+    ) {}
+
+    public record BreakdownRow(
+            String bucket,
+            long requests,
+            long inputTokens,
+            long outputTokens,
+            BigDecimal totalCost,
+            long cacheHits
     ) {}
 }

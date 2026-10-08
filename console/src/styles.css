@@ -1,0 +1,236 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.login-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.login-card {
+  background: #1e293b;
+  padding: 2rem;
+  border-radius: 12px;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.login-card h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
+
+.muted { color: #94a3b8; font-size: 0.85rem; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+input, select {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+button {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.link-button {
+  background: transparent;
+  color: #94a3b8;
+  text-decoration: underline;
+}
+
+.error-banner {
+  background: #450a0a;
+  border: 1px solid #991b1b;
+  color: #fecaca;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  margin: 0.5rem 1.5rem;
+  font-size: 0.85rem;
+}
+
+.app-shell { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.panel {
+  background: #1e293b;
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.panel h2 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+}
+
+.stat-card {
+  background: #0f172a;
+  border-radius: 8px;
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.stat-value { font-size: 1.3rem; font-weight: 600; }
+.stat-label { font-size: 0.75rem; color: #94a3b8; margin-top: 0.2rem; }
+
+.provider-list { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+
+.provider-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #0f172a;
+  padding: 0.4rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+}
+
+.status-dot {
+  width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+}
+.status-up { background: #22c55e; }
+.status-degraded { background: #eab308; }
+.status-down { background: #ef4444; }
+.status-unknown { background: #64748b; }
+
+.group-by-row { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.5rem; font-size: 0.85rem; }
+.pill { background: #1e293b; color: #94a3b8; padding: 0.3rem 0.75rem; border-radius: 16px; font-size: 0.8rem; }
+.pill-active { background: #2563eb; color: white; }
+
+.bar-chart { display: flex; flex-direction: column; gap: 0.6rem; }
+.bar-row { display: grid; grid-template-columns: 100px 1fr; gap: 0.5rem; align-items: center; }
+.bar-label { font-size: 0.85rem; }
+.bar-track { background: #0f172a; border-radius: 6px; height: 10px; overflow: hidden; }
+.bar-fill { background: #2563eb; height: 100%; }
+.bar-meta { grid-column: 2; font-size: 0.75rem; color: #94a3b8; }
+
+.filter-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.filter-row input, .filter-row select { flex: 1; min-width: 120px; }
+
+.requests-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.requests-table th { text-align: left; padding: 0.5rem; border-bottom: 1px solid #334155; color: #94a3b8; }
+.requests-table td { padding: 0.5rem; border-bottom: 1px solid #1e293b; }
+.clickable-row { cursor: pointer; }
+.clickable-row:hover { background: #0f172a; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.modal-card {
+  background: #1e293b; border-radius: 10px; padding: 1.5rem;
+  width: 480px; max-height: 80vh; overflow-y: auto;
+}
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.icon-button { background: transparent; color: #94a3b8; font-size: 1rem; padding: 0.2rem 0.5rem; }
+
+.detail-grid { display: grid; grid-template-columns: 140px 1fr; gap: 0.4rem 0.75rem; font-size: 0.85rem; margin: 0; }
+.detail-grid dt { color: #94a3b8; }
+.detail-grid dd { margin: 0; word-break: break-word; }
+.error-text { color: #fca5a5; }
+
+/* --- header tabs + dashboard toolbar --- */
+.header-left { display: flex; align-items: center; gap: 1.25rem; }
+.tab-nav { display: flex; gap: 0.4rem; }
+.tab {
+  background: #1e293b;
+  color: #94a3b8;
+  padding: 0.35rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.tab-active { background: #2563eb; color: white; }
+.dashboard-toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.75rem; }
+
+/* --- chat playground --- */
+.chat-panel { display: flex; flex-direction: column; height: 70vh; }
+
+.chat-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.model-picker { display: flex; gap: 0.4rem; }
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  background: #0f172a;
+  border-radius: 8px;
+}
+.chat-empty { margin: auto; text-align: center; max-width: 420px; }
+
+.chat-bubble {
+  max-width: 80%;
+  padding: 0.6rem 0.85rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.chat-user {
+  align-self: flex-end;
+  background: #2563eb;
+  color: white;
+  border-bottom-right-radius: 3px;
+}
+.chat-assistant {
+  align-self: flex-start;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-bottom-left-radius: 3px;
+}
+.chat-content { white-space: pre-wrap; word-break: break-word; }
+
+.chat-meta { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
+.meta-chip {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 10px;
+}
+.meta-cache { color: #86efac; border-color: #166534; }
+
+.chat-error { margin: 0.5rem 0 0; }
+
+.chat-input-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+.chat-input-row input { flex: 1; }

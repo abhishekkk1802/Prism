@@ -35,3 +35,9 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Secrets / local env (never commit) ###
+.env
+.env.local
+.env.*.local
+*.key

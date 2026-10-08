@@ -1,0 +1,110 @@
+version: "3.9"
+
+# Prism capstone deployment shape (plan section 1):
+# one gateway instance, PostgreSQL+pgvector, Redis, two mock providers,
+# and the dashboard. Run with: docker compose up --build
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: task_management
+      POSTGRES_USER: task_app
+      POSTGRES_PASSWORD: task_app_password
+    # Enables the pgvector extension once, before Flyway's V8 migration
+    # (which declares `vector(1536)` columns) ever runs on a fresh database.
+    volumes:
+      - ./docker/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U task_app -d task_management"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  alpha:
+    build: ./mock-providers
+    command: ["--port", "9001", "--name", "alpha"]
+    environment:
+      MOCK_PROVIDER_NAME: alpha
+    ports:
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9001/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  beta:
+    build: ./mock-providers
+    command: ["--port", "9002", "--name", "beta"]
+    environment:
+      MOCK_PROVIDER_NAME: beta
+    ports:
+      - "9002:9002"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9002/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gateway:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      alpha:
+        condition: service_healthy
+      beta:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/task_management
+      SPRING_DATASOURCE_USERNAME: task_app
+      SPRING_DATASOURCE_PASSWORD: task_app_password
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      PRISM_ADMIN_TOKEN: ${PRISM_ADMIN_TOKEN:-prism-admin-dev-token}
+      PRISM_GATEWAY_CONFIG_PATH: /app/config/gateway-config.json
+      # Real embedding/chat credentials are optional for the mock-provider
+      # demo; set these in your shell env or a .env file to use real models.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-placeholder}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    volumes:
+      # Point providers at the Compose service names instead of localhost,
+      # without touching the jar or any Java code.
+      - ./docker/gateway-config.docker.json:/app/config/gateway-config.json:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  dashboard:
+    build: ./console
+    depends_on:
+      - gateway
+    environment:
+      # Base URL the dashboard's browser-side code calls for /admin/* APIs.
+      VITE_API_BASE_URL: http://localhost:8080
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres-data:

@@ -7,6 +7,7 @@ import com.prism.gateway.exception.BudgetExceededException;
 import com.prism.gateway.exception.ModelNotAllowedException;
 import com.prism.gateway.exception.RateLimitExceededException;
 import com.prism.gateway.logging.RequestLogService;
+import com.prism.gateway.metrics.PrismMetrics;
 import com.prism.gateway.routing.DifficultyClassifier;
 import com.prism.gateway.routing.ModelResolver;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ public class ChatCompletionService {
     private final BudgetAdmissionService budgetAdmissionService;
     private final RequestLogService requestLogService;
     private final SemanticCacheService semanticCacheService;
+    private final PrismMetrics metrics;
 
     public ChatCompletionService(
             ModelResolver modelResolver,
@@ -36,7 +38,8 @@ public class ChatCompletionService {
             RateLimitService rateLimitService,
             BudgetAdmissionService budgetAdmissionService,
             RequestLogService requestLogService,
-            SemanticCacheService semanticCacheService
+            SemanticCacheService semanticCacheService,
+            PrismMetrics metrics
     ) {
         this.modelResolver = modelResolver;
         this.providerExecutor = providerExecutor;
@@ -46,6 +49,7 @@ public class ChatCompletionService {
         this.budgetAdmissionService = budgetAdmissionService;
         this.requestLogService = requestLogService;
         this.semanticCacheService = semanticCacheService;
+        this.metrics = metrics;
     }
 
     public Mono<ProviderExecutionResult> complete(ChatCompletionRequest request) {
@@ -62,6 +66,7 @@ public class ChatCompletionService {
                         "model_not_allowed",
                         System.currentTimeMillis() - startTime
                 );
+                metrics.recordRequest("rejected", request.model(), null, false, false);
                 return Mono.error(new ModelNotAllowedException(
                         "Model '" + request.model() + "' is not allowed for this API key"
                 ));
@@ -78,6 +83,7 @@ public class ChatCompletionService {
                         "budget_exceeded",
                         System.currentTimeMillis() - startTime
                 );
+                metrics.recordRequest("rejected", request.model(), null, false, false);
                 return Mono.error(e);
             }
 
@@ -92,6 +98,7 @@ public class ChatCompletionService {
                                             "rate_limit_exceeded",
                                             System.currentTimeMillis() - startTime
                                     );
+                                    metrics.recordRequest("rejected", request.model(), null, false, false);
                                     return Mono.error(new RateLimitExceededException("Rate limit exceeded"));
                                 }
                                 return Mono.empty();
@@ -105,7 +112,8 @@ public class ChatCompletionService {
                 String routingReason = "direct";
 
                 if ("auto".equals(request.model())) {
-                    String difficulty = difficultyClassifier.classify(request);
+                    DifficultyClassifier.Decision decision = difficultyClassifier.classifyWithReason(request);
+                    String difficulty = decision.difficulty();
                     String routedAlias = modelConfig.route_by_difficulty().get(difficulty);
 
                     if (routedAlias == null) {
@@ -115,9 +123,13 @@ public class ChatCompletionService {
                     }
 
                     chosenTier = routedAlias;
-                    routingReason = "auto_" + difficulty;
+                    // Plain-English reason (e.g. "complex: proof/deep-reasoning request")
+                    // instead of just the difficulty label, per the Prism plan's
+                    // auto-routing explainability requirement.
+                    routingReason = decision.reason();
                     modelConfig = modelResolver.resolve(routedAlias);
-                    System.out.println("Auto routing: " + difficulty + " -> " + routedAlias);
+                    System.out.println("Auto routing: " + decision.reason() + " -> " + routedAlias);
+                    metrics.recordRouteDecision(difficulty);
                 }
 
                 final ModelAliasConfig resolvedConfig = modelConfig;
@@ -146,6 +158,9 @@ public class ChatCompletionService {
                                 0, 0, BigDecimal.ZERO, true, false, 0,
                                 System.currentTimeMillis() - startTime
                         );
+                        metrics.recordCacheHit(resolvedTier);
+                        metrics.recordRequest("success", request.model(), "cache", true, false);
+                        metrics.recordRequestDuration(request.model(), System.currentTimeMillis() - startTime);
                         return Mono.just(new ProviderExecutionResult(
                                 cacheHit.response(),
                                 "cache",
@@ -182,6 +197,12 @@ public class ChatCompletionService {
                                     result.retries(),
                                     System.currentTimeMillis() - startTime
                             );
+                            metrics.recordRequest(
+                                    "success", request.model(), result.provider(),
+                                    result.cacheHit(), result.fallback()
+                            );
+                            metrics.recordRequestDuration(request.model(), System.currentTimeMillis() - startTime);
+                            metrics.recordCost(policy.team(), result.model(), result.costUsd());
                             // Store successful response under the RESOLVED tier
                             if (cacheEnabled && result.response() != null) {
                                 semanticCacheService.store(
@@ -197,6 +218,8 @@ public class ChatCompletionService {
                                     e.getMessage(),
                                     System.currentTimeMillis() - startTime
                             );
+                            metrics.recordRequest("error", request.model(), null, false, false);
+                            metrics.recordRequestDuration(request.model(), System.currentTimeMillis() - startTime);
                             return Mono.error(e);
                         });
             }));

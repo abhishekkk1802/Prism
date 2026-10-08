@@ -5,6 +5,7 @@ import com.prism.gateway.config.model.ModelAliasConfig;
 import com.prism.gateway.config.model.ProviderConfig;
 import com.prism.gateway.dto.ChatCompletionRequest;
 import com.prism.gateway.dto.ChatCompletionResponse;
+import com.prism.gateway.metrics.PrismMetrics;
 import com.prism.gateway.routing.ProviderRegistry;
 import com.prism.gateway.routing.ProviderResolver;
 import org.springframework.stereotype.Service;
@@ -22,15 +23,17 @@ public class ProviderExecutor {
     private final GatewayConfig gatewayConfig;
     private final CostCalculator costCalculator;
     private final ProviderRetryPolicy retryPolicy;
+    private final PrismMetrics metrics;
 
 
-    public ProviderExecutor(LLMProvider llmProvider, ProviderRegistry providerRegistry, ProviderResolver providerResolver, GatewayConfig gatewayConfig, CostCalculator costCalculator, ProviderRetryPolicy retryPolicy) {
+    public ProviderExecutor(LLMProvider llmProvider, ProviderRegistry providerRegistry, ProviderResolver providerResolver, GatewayConfig gatewayConfig, CostCalculator costCalculator, ProviderRetryPolicy retryPolicy, PrismMetrics metrics) {
         this.llmProvider = llmProvider;
         this.providerRegistry = providerRegistry;
         this.providerResolver = providerResolver;
         this.gatewayConfig = gatewayConfig;
         this.costCalculator = costCalculator;
         this.retryPolicy = retryPolicy;
+        this.metrics = metrics;
     }
 
     public ProviderExecutionResult execute(
@@ -314,6 +317,10 @@ public class ProviderExecutor {
                 System.out.println(
                         "Attempt " + attempt + " failed for " + model + ": " + exception.getMessage()
                 );
+                metrics.recordProviderError(
+                        providerResolver.resolveProvider(model),
+                        exception.getClass().getSimpleName()
+                );
                 if (!retryPolicy.isRetryable(exception)) {
                     System.out.println(
                             "Non-retryable provider failure. Stopping retries for " + model
@@ -347,11 +354,17 @@ public class ProviderExecutor {
 
         ProviderConfig provider = providerRegistry.getProvider(providerName);
 
-        ChatCompletionResponse response = llmProvider.complete(
-                request,
-                provider,
-                model
-        );
+        long callStart = System.currentTimeMillis();
+        ChatCompletionResponse response;
+        try {
+            response = llmProvider.complete(
+                    request,
+                    provider,
+                    model
+            );
+        } finally {
+            metrics.recordProviderDuration(providerName, System.currentTimeMillis() - callStart);
+        }
 
         long inputTokens = response.usage() != null ? response.usage().inputTokens() : 0L;
         long outputTokens = response.usage() != null ? response.usage().outputTokens() : 0L;

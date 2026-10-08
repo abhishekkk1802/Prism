@@ -35,7 +35,7 @@ public class OpenAIProvider implements LLMProvider {
                 providerClientRegistry.getClient(providerConfig.name());
 
         ChatCompletionCreateParams.Builder builder =
-                buildRequest(request, resolvedModel);
+                buildRequest(request, providerConfig.upstreamModel(resolvedModel));
 
         ChatCompletion completion = client
                 .chat()
@@ -90,7 +90,7 @@ public class OpenAIProvider implements LLMProvider {
                 providerClientRegistry.getClient(providerConfig.name());
 
         ChatCompletionCreateParams.Builder builder =
-                buildRequest(request, resolvedModel);
+                buildRequest(request, providerConfig.upstreamModel(resolvedModel));
 
         return Flux.create(sink -> {
 
