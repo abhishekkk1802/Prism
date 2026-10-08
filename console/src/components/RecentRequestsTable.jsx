@@ -24,6 +24,12 @@ export default function RecentRequestsTable({ entries, onReload }) {
     return "Success · Cache miss";
   }
 
+  function resultClass(entry) {
+    if (entry.status === "error") return "result-tag is-error";
+    if (entry.status === "rejected") return "result-tag is-rejected";
+    return "result-tag";
+  }
+
   return (
     <section className="panel">
       <h2>Recent requests</h2>
@@ -40,47 +46,51 @@ export default function RecentRequestsTable({ entries, onReload }) {
         <button type="submit">Apply filters</button>
       </form>
 
-      <table className="requests-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Asked for</th>
-            <th>Provider / Model</th>
-            <th>Tokens</th>
-            <th>Cost</th>
-            <th>Result</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((entry) => (
-            <tr key={entry.requestId} onClick={() => setSelected(entry)} className="clickable-row">
-              <td>{new Date(entry.createdAt).toLocaleTimeString()}</td>
-              <td>
-                {entry.requestedModel}
-                {entry.chosenTier && entry.chosenTier !== entry.requestedModel
-                  ? ` → ${entry.chosenTier}`
-                  : ""}
-              </td>
-              <td>
-                {entry.cacheHit ? "Saved answer" : entry.provider ?? "—"}
-                {entry.finalModel && !entry.cacheHit ? ` / ${entry.finalModel}` : ""}
-              </td>
-              <td>
-                {entry.inputTokens} + {entry.outputTokens} = {entry.totalTokens}
-              </td>
-              <td>${entry.costUsd.toFixed(6)}</td>
-              <td>{resultLabel(entry)}</td>
-            </tr>
-          ))}
-          {entries.length === 0 && (
+      <div className="table-scroll">
+        <table className="requests-table">
+          <thead>
             <tr>
-              <td colSpan={6} className="muted">
-                No requests match these filters.
-              </td>
+              <th>Time</th>
+              <th>Asked for</th>
+              <th>Provider / Model</th>
+              <th>Tokens</th>
+              <th>Cost</th>
+              <th>Result</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {entries.map((entry) => (
+              <tr key={entry.requestId} onClick={() => setSelected(entry)} className="clickable-row">
+                <td>{new Date(entry.createdAt).toLocaleTimeString()}</td>
+                <td>
+                  {entry.requestedModel}
+                  {entry.chosenTier && entry.chosenTier !== entry.requestedModel
+                    ? ` → ${entry.chosenTier}`
+                    : ""}
+                </td>
+                <td>
+                  {entry.cacheHit ? "Saved answer" : entry.provider ?? "—"}
+                  {entry.finalModel && !entry.cacheHit ? ` / ${entry.finalModel}` : ""}
+                </td>
+                <td>
+                  {entry.inputTokens} + {entry.outputTokens} = {entry.totalTokens}
+                </td>
+                <td>${entry.costUsd.toFixed(6)}</td>
+                <td>
+                  <span className={resultClass(entry)}>{resultLabel(entry)}</span>
+                </td>
+              </tr>
+            ))}
+            {entries.length === 0 && (
+              <tr>
+                <td colSpan={6} className="muted">
+                  No requests match these filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {selected && <RequestDetailModal entry={selected} onClose={() => setSelected(null)} />}
     </section>

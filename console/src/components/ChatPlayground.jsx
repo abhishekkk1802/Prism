@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
 
 const MODELS = [
+  { id: "auto", label: "Auto", hint: "routes by difficulty" },
   { id: "fast", label: "Fast", hint: "cheap tier" },
   { id: "smart", label: "Smart", hint: "high-quality tier" },
-  { id: "auto", label: "Auto", hint: "routes by difficulty" },
 ];
 
 /**
@@ -66,19 +66,16 @@ export default function ChatPlayground({ client, teamKey }) {
   return (
     <section className="panel chat-panel">
       <div className="chat-toolbar">
-        <div className="model-picker">
-          {MODELS.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              className={m.id === model ? "pill pill-active" : "pill"}
-              onClick={() => setModel(m.id)}
-              title={m.hint}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+        <label className="model-picker">
+          <span className="muted">Model:</span>
+          <select value={model} onChange={(e) => setModel(e.target.value)}>
+            {MODELS.map((m) => (
+              <option key={m.id} value={m.id} title={m.hint}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" className="link-button" onClick={clearChat} disabled={messages.length === 0}>
           Clear
         </button>
@@ -115,7 +112,13 @@ export default function ChatPlayground({ client, teamKey }) {
             )}
           </div>
         ))}
-        {sending && <div className="chat-bubble chat-assistant"><div className="chat-content muted">Thinking…</div></div>}
+        {sending && (
+          <div className="chat-bubble chat-assistant">
+            <div className="typing-dots">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && <div className="error-banner chat-error">{error}</div>}

@@ -11,7 +11,6 @@ import ChatPlayground from "./components/ChatPlayground";
 export default function App() {
   const [client, setClient] = useState(null);
   const [teamKey, setTeamKey] = useState("");
-  const [tab, setTab] = useState("dashboard");
 
   const [usage, setUsage] = useState(null);
   const [logs, setLogs] = useState([]);
@@ -45,7 +44,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (client && teamKey && tab === "dashboard") {
+    if (client && teamKey) {
       loadAll(client, teamKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -64,68 +63,60 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div className="header-left">
-          <h1>Prism Console</h1>
-          <nav className="tab-nav">
-            <button
-              className={tab === "dashboard" ? "tab tab-active" : "tab"}
-              onClick={() => setTab("dashboard")}
-            >
-              Dashboard
-            </button>
-            <button
-              className={tab === "chat" ? "tab tab-active" : "tab"}
-              onClick={() => setTab("chat")}
-            >
-              Chat
-            </button>
-          </nav>
-        </div>
+        <h1>Prism Console</h1>
         <button className="link-button" onClick={() => setClient(null)}>
           Disconnect
         </button>
       </header>
 
-      {error && tab === "dashboard" && <div className="error-banner">{error}</div>}
+      {error && <div className="error-banner">{error}</div>}
 
-      {tab === "chat" ? (
-        <ChatPlayground client={client} teamKey={teamKey} />
-      ) : (
-        <>
+      <div className="split-layout">
+        <div className="split-pane-dashboard">
           <div className="dashboard-toolbar">
+            <h2>Overview</h2>
             <button className="pill" onClick={() => client && teamKey && loadAll(client, teamKey)}>
-              Refresh
+              ↻ Refresh
             </button>
           </div>
 
-          {health && <ProviderHealthPanel health={health} />}
+          <div className="panel-row">
+            {health && <ProviderHealthPanel health={health} />}
+            {cache && <CacheStatsPanel stats={cache} />}
+          </div>
+
           {usage && <UsageSummary usage={usage} />}
-          {cache && <CacheStatsPanel stats={cache} />}
 
           {breakdown && (
-            <>
-              <div className="group-by-row">
-                <span>Group by:</span>
-                {["provider", "model", "day"].map((g) => (
-                  <button
-                    key={g}
-                    className={g === groupBy ? "pill pill-active" : "pill"}
-                    onClick={() => setGroupBy(g)}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-              <BreakdownChart breakdown={breakdown} />
-            </>
+            <div className="panel">
+              <h2>
+                Breakdown
+                <span className="group-by-row">
+                  {["provider", "model", "day"].map((g) => (
+                    <button
+                      key={g}
+                      className={g === groupBy ? "pill pill-active" : "pill"}
+                      onClick={() => setGroupBy(g)}
+                    >
+                      {g}
+                    </button>
+                  ))}
+                </span>
+              </h2>
+              <BreakdownChart breakdown={breakdown} hideTitle />
+            </div>
           )}
 
           <RecentRequestsTable
             entries={logs}
             onReload={(filters) => client && teamKey && loadAll(client, teamKey, filters)}
           />
-        </>
-      )}
+        </div>
+
+        <div className="split-pane-chat">
+          <ChatPlayground client={client} teamKey={teamKey} />
+        </div>
+      </div>
     </div>
   );
 }
