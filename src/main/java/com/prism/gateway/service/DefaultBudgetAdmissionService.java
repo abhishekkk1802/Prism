@@ -87,4 +87,27 @@ public class DefaultBudgetAdmissionService
          * Redis budget hold will be removed here.
          */
     }
+
+    @Override
+    public boolean settleWithinBudget(
+            UUID keyId,
+            String requestId,
+            long inputTokens,
+            long outputTokens,
+            BigDecimal actualCost,
+            boolean cacheHit,
+            BigDecimal monthlyBudget
+    ) {
+        LocalDate month = LocalDate.now().withDayOfMonth(1);
+
+        return usageMonthlyRepository.settleWithinBudget(
+                keyId,
+                month,
+                inputTokens,
+                outputTokens,
+                actualCost,
+                cacheHit,
+                monthlyBudget
+        );
+    }
 }

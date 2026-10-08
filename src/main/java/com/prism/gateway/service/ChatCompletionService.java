@@ -162,10 +162,16 @@ public class ChatCompletionService {
                 // 6. Execute, log, and store in cache
                 return Mono.fromCallable(() -> providerExecutor.execute(request, resolvedConfig))
                         .doOnNext(result -> {
-                            budgetAdmissionService.settle(
+                            // Authoritative, race-free budget enforcement: the check
+                            // and the usage increment happen atomically in one SQL
+                            // statement. The cheap checkAndReserve pre-check above only
+                            // fast-fails obviously-over-budget requests before the
+                            // provider call.
+                            budgetAdmissionService.settleWithinBudget(
                                     policy.id(), requestId,
                                     result.inputTokens(), result.outputTokens(),
-                                    result.costUsd(), result.cacheHit()
+                                    result.costUsd(), result.cacheHit(),
+                                    policy.monthlyBudgetUsd()
                             );
                             requestLogService.logSuccess(
                                     policy.id(), requestId,
