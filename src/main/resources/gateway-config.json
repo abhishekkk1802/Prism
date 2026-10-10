@@ -3,11 +3,11 @@
   "providers": [
     {
       "name": "alpha",
-      "base_url": "https://localhost:9999/v1",
+      "base_url": "https://openrouter.ai/api/v1",
       "api_key": "${OPENROUTER_API_KEY}",
       "models": {
         "alpha-small": "openai/gpt-4o-mini",
-        "alpha-large": "openai/gpt-4o"
+        "alpha-large": "openai/gpt-4o-mini"
       }
     },
     {
