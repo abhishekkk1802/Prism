@@ -1,0 +1,20 @@
+{"id": "route_001", "expected_tier": "fast", "note": "simple definition lookup", "prompt": "What is a message queue?"}
+{"id": "route_002", "expected_tier": "fast", "note": "simple extraction", "prompt": "Extract the names from this list: Alice, Bob, Carol."}
+{"id": "route_003", "expected_tier": "fast", "note": "simple rewrite", "prompt": "Rewrite this email politely: 'send me the report now'."}
+{"id": "route_004", "expected_tier": "fast", "note": "simple summarization", "prompt": "Summarize this article in two sentences."}
+{"id": "route_005", "expected_tier": "fast", "note": "simple classification", "prompt": "Classify this text as positive or negative: 'the service was fine'."}
+{"id": "route_006", "expected_tier": "fast", "note": "long-but-trivial: lots of text, trivial lookup task", "prompt": "Here is a long roster of 200 employees with their departments, start dates, and office locations, spanning several paragraphs of filler text to pad out the context window. Somewhere in that roster is employee number 42. Find employee 42's email address and return it."}
+{"id": "route_007", "expected_tier": "fast", "note": "long-but-trivial: verbose preamble, simple formatting ask", "prompt": "I know this is a lot of context, and I apologize for the length, but I wanted to give you the full background on our quarterly planning process, our team structure, our historical velocity numbers, and our stakeholder list before asking: can you just reformat the following three bullet points into a numbered list?"}
+{"id": "route_008", "expected_tier": "fast", "note": "simple translation", "prompt": "Translate 'good morning, how are you?' into French."}
+{"id": "route_009", "expected_tier": "fast", "note": "simple listing", "prompt": "List the capitals of five European countries."}
+{"id": "route_010", "expected_tier": "fast", "note": "long-but-trivial: large JSON blob, trivial field pull", "prompt": "Below is a large JSON object representing a customer order with dozens of nested fields covering shipping, billing, line items, discounts, and tax breakdowns across multiple paragraphs of data. All I need from this is the single top-level 'order_id' field — what is it?"}
+{"id": "route_011", "expected_tier": "smart", "note": "short-but-hard: formal proof obligation in one line", "prompt": "Prove this algorithm terminates."}
+{"id": "route_012", "expected_tier": "smart", "note": "short-but-hard: terse but requires deep reasoning", "prompt": "Why is this deadlock?"}
+{"id": "route_013", "expected_tier": "smart", "note": "short-but-hard: single-sentence but open-ended design question", "prompt": "Design a consistent, available cache."}
+{"id": "route_014", "expected_tier": "smart", "note": "concurrency bug hunt", "prompt": "Find this race condition in the following Java code and explain the fix."}
+{"id": "route_015", "expected_tier": "smart", "note": "comparative analysis", "prompt": "Compare the consistency models used in distributed databases."}
+{"id": "route_016", "expected_tier": "smart", "note": "root-cause debugging", "prompt": "There's a memory leak in this service, please find the root cause."}
+{"id": "route_017", "expected_tier": "smart", "note": "theorem trade-offs", "prompt": "Explain the CAP theorem trade-offs for this system design."}
+{"id": "route_018", "expected_tier": "smart", "note": "API design with constraints", "prompt": "Design an idempotent payment API while keeping backward compatibility."}
+{"id": "route_019", "expected_tier": "smart", "note": "short-but-hard: terse proof + explanation request", "prompt": "Prove the fix works."}
+{"id": "route_020", "expected_tier": "smart", "note": "short-but-hard: minimal wording, maximal reasoning depth", "prompt": "Explain why this fails under partition."}

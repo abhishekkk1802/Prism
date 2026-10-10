@@ -2,14 +2,10 @@ package com.prism.gateway.service;
 
 import com.prism.gateway.dto.ChatCompletionRequest;
 import com.prism.gateway.repository.ApiKeyRepository;
+import com.prism.gateway.security.TokenHasher;
 import org.springframework.stereotype.Service;
 
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-
-import static okio.HashingSink.sha256;
+import java.util.Optional;
 
 @Service
 public class ApiKeyService {
@@ -20,35 +16,47 @@ public class ApiKeyService {
         this.apiKeyRepository = apiKeyRepository;
     }
 
-    public boolean isValid(String apiKey){
-        if(apiKey == null || apiKey.isBlank())return false;
+    public Optional<ApiKeyPolicy> getPolicy(String apiKey){
+        if(apiKey == null || apiKey.isBlank()) return Optional.empty();
 
         String hash = sha256(apiKey);
 
-        return apiKeyRepository.findActiveKey(hash).isPresent();
+        return apiKeyRepository.findActivePolicy(hash);
+    }
+
+    public boolean isValid(String apiKey){
+        return getPolicy(apiKey).isPresent();
+    }
+
+    public boolean isModelAllowed(ApiKeyPolicy policy, String model) {
+
+        if (policy.allowedModels() == null ||
+                policy.allowedModels().isEmpty()) {
+            return true;
+        }
+        // "auto" is a routing alias.
+        // It is allowed only when the key can access
+        // all tiers that auto may route to.
+        if ("auto".equals(model)) {
+            return policy.allowedModels().contains("fast")
+                    && policy.allowedModels().contains("smart");
+        }
+
+        return policy.allowedModels().contains(model);
     }
 
     private String sha256(String value){
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return TokenHasher.sha256(value);
+    }
 
-            byte[] hash = digest.digest(
-                    value.getBytes(StandardCharsets.UTF_8)
-            );
+    public Optional<ApiKeyDetails> getActiveKey(String apiKey) {
 
-            StringBuilder hex = new StringBuilder();
-
-            for(byte b : hash){
-                hex.append(String.format("%02x",b));
-            }
-
-            return hex.toString();
-
-        } catch (NoSuchAlgorithmException e){
-            throw new IllegalStateException(
-                    "SHA-256 algorithm not available",
-                    e
-            );
+        if (apiKey == null || apiKey.isBlank()) {
+            return Optional.empty();
         }
+
+        String hash = sha256(apiKey);
+
+        return apiKeyRepository.findActiveKeyDetails(hash);
     }
 }

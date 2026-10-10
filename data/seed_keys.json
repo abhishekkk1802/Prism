@@ -1,0 +1,39 @@
+{
+  "_comment": "Seed tenants (virtual API keys) for the sample pack. 'free-tier' and 'budget-demo' use the exact virtual_key values referenced by the evaluation guide's load test and budget-edge checks, respectively.",
+  "tenants": [
+    {
+      "team": "free-tier",
+      "virtual_key": "prism-sk-free-7g8h9i",
+      "monthly_budget_usd": 5.00,
+      "rate_limit": 10,
+      "model_allowlist": ["fast", "auto"],
+      "semantic_cache": {
+        "enabled": true,
+        "similarity_threshold": 0.92
+      }
+    },
+    {
+      "team": "budget-demo",
+      "virtual_key": "prism-sk-budget-demo-0j1k2l",
+      "_comment": "Budget set so exactly one request fits; the second request in the same billing window must be rejected with budget_exceeded.",
+      "monthly_budget_usd": 0.000010,
+      "rate_limit": 60,
+      "model_allowlist": ["fast", "smart", "auto"],
+      "semantic_cache": {
+        "enabled": false,
+        "similarity_threshold": 0.90
+      }
+    },
+    {
+      "team": "platform",
+      "virtual_key": "prism-sk-platform-3k4l5m",
+      "monthly_budget_usd": 250.00,
+      "rate_limit": 120,
+      "model_allowlist": ["fast", "smart", "auto"],
+      "semantic_cache": {
+        "enabled": true,
+        "similarity_threshold": 0.95
+      }
+    }
+  ]
+}

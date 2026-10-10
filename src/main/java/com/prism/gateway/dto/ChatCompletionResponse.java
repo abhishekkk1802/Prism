@@ -8,7 +8,8 @@ public record ChatCompletionResponse(
         String object,
         long created,
         String model,
-        List<Choice> choices
+        List<Choice> choices,
+        Usage usage
 ) {
     public record Choice(
             int index,
@@ -20,4 +21,9 @@ public record ChatCompletionResponse(
             String role,
             String content
     ){}
+
+    public record Usage(
+            long inputTokens,
+            long outputTokens
+    ) {}
 }

@@ -1,15 +1,23 @@
 {
-  "_comment": "Sample gateway configuration: a provider registry, model aliases, and fallback chains.",
+  "_comment": "Gateway configuration: provider registry, model aliases, and fallback chains. The 'alpha' and 'beta' providers both talk to OpenRouter (real models) but are configured as independent primary/fallback legs via different model mappings, so a primary-model failure falls over to a real backup model. API keys are injected from the OPENROUTER_API_KEY environment variable - never hardcode a real key in this committed file.",
   "providers": [
     {
       "name": "alpha",
-      "base_url": "http://localhost:9001/v1",
-      "api_key": "mock-key-alpha"
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "models": {
+        "alpha-small": "openai/gpt-4o-mini",
+        "alpha-large": "openai/gpt-4o-mini"
+      }
     },
     {
       "name": "beta",
-      "base_url": "http://localhost:9002/v1",
-      "api_key": "mock-key-beta"
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "models": {
+        "beta-small": "meta-llama/llama-3.1-8b-instruct",
+        "beta-large": "anthropic/claude-3-haiku"
+      }
     }
   ],
   "model_aliases": {
