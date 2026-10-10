@@ -58,6 +58,8 @@ public class SemanticCacheService {
             String prompt = canonicalPrompt(request);
 
             if (!cacheabilityChecker.isCacheable(prompt)) {
+                log("CACHE SKIP (time-sensitive prompt) model=%s threshold=%.4f prompt=%s"
+                        .formatted(model, threshold, preview(prompt)));
                 return Optional.empty();
             }
 
@@ -67,22 +69,37 @@ public class SemanticCacheService {
             Optional<SemanticCacheRepository.CacheEntry> exact =
                     repository.findByHash(keyId, model, hash);
             if (exact.isPresent()) {
+                log("CACHE HIT (exact hash match) model=%s similarity=1.0000 prompt=%s"
+                        .formatted(model, preview(prompt)));
                 return toHit(exact.get());
             }
 
-            // 2. Semantic search
+            // 2. Semantic search - always logs the closest candidate's score,
+            // even on a miss, so "why didn't this match" is never a guess.
             float[] embedding = embeddingService.embed(prompt);
-            Optional<SemanticCacheRepository.CacheEntry> similar =
-                    repository.findSimilar(keyId, model, embedding, threshold);
-            if (similar.isPresent()) {
-                return toHit(similar.get());
+            Optional<SemanticCacheRepository.SimilarityCandidate> candidate =
+                    repository.findMostSimilar(keyId, model, embedding);
+
+            if (candidate.isEmpty()) {
+                log("CACHE MISS (no stored entries yet) model=%s threshold=%.4f prompt=%s"
+                        .formatted(model, threshold, preview(prompt)));
+                return Optional.empty();
             }
 
+            double similarity = candidate.get().similarity();
+            if (similarity >= threshold) {
+                log("CACHE HIT (semantic) model=%s similarity=%.4f threshold=%.4f prompt=%s"
+                        .formatted(model, similarity, threshold, preview(prompt)));
+                return toHit(candidate.get().entry());
+            }
+
+            log("CACHE MISS (below threshold) model=%s bestSimilarity=%.4f threshold=%.4f gap=%.4f prompt=%s"
+                    .formatted(model, similarity, threshold, threshold - similarity, preview(prompt)));
             return Optional.empty();
 
         } catch (Exception e) {
             // Cache must never break the request path.
-            System.out.println("Semantic cache lookup failed, treating as miss: " + e.getMessage());
+            log("CACHE ERROR (treating as miss) model=%s error=%s".formatted(model, e.getMessage()));
             return Optional.empty();
         }
     }
@@ -117,9 +134,21 @@ public class SemanticCacheService {
                     inputTokens, outputTokens,
                     null  // no expiry by default; time-sensitivity handled at prompt level
             );
+            log("CACHE STORE model=%s prompt=%s".formatted(model, preview(prompt)));
         } catch (Exception e) {
-            System.out.println("Semantic cache store failed: " + e.getMessage());
+            log("CACHE STORE FAILED model=%s error=%s".formatted(model, e.getMessage()));
         }
+    }
+
+    /** Single, greppable log prefix for every cache decision ("grep CACHE" finds them all). */
+    private void log(String message) {
+        System.out.println("[semantic-cache] " + message);
+    }
+
+    /** Truncates long prompts (e.g. full multi-turn history) so log lines stay scannable. */
+    private String preview(String prompt) {
+        String oneLine = prompt.replace("\n", " \\n ").strip();
+        return oneLine.length() <= 120 ? oneLine : oneLine.substring(0, 117) + "...";
     }
 
     private Optional<CacheHit> toHit(SemanticCacheRepository.CacheEntry entry) {

@@ -45,7 +45,7 @@ class CacheIsolationConcurrencyTest {
         }
 
         @Override
-        public Optional<CacheEntry> findSimilar(UUID keyId, String model, float[] embedding, double threshold) {
+        public Optional<SimilarityCandidate> findMostSimilar(UUID keyId, String model, float[] embedding) {
             scopes.add(keyId + "|" + model);
             return Optional.empty();
         }

@@ -1,0 +1,7 @@
+{
+  "_comment": "Per-1M-token prices (USD) for every concrete model the sample pack references. Keys starting with '_' are ignored by validate_pack.py. Mock-provider models are priced at a nominal rate so cost accounting has something non-zero to reconcile against in the load test.",
+  "alpha-small": { "input_per_1m": 0.15, "output_per_1m": 0.60 },
+  "alpha-large": { "input_per_1m": 2.50, "output_per_1m": 10.00 },
+  "beta-small":  { "input_per_1m": 0.10, "output_per_1m": 0.40 },
+  "beta-large":  { "input_per_1m": 3.00, "output_per_1m": 12.00 }
+}

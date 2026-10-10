@@ -39,6 +39,50 @@ Client  --->  Prism Gateway  --->  LLM Provider (OpenAI, OpenRouter, or any Open
 | Sample data | Example gateway config, pricing table, seed keys, and test cases | `data/` |
 | Deployment | Dockerfile and docker-compose for running the full stack together | `docker-compose.yml`, `Dockerfile`, `docker/` |
 
+## API Reference
+
+Summary tables below. For full request/response bodies and every error case (with live-verified examples), see [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
+
+### Public (no authentication)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Liveness check — `{"status":"UP"}` |
+| GET | `/actuator/health/readiness` | Readiness check (database and Redis reachable) |
+| GET | `/actuator/metrics/{name}` | Micrometer metrics (e.g. `prism_requests_total`, `prism_provider_duration`) |
+
+### Data plane (`Authorization: Bearer <team-key>`, enforced by `ApiKeyWebFilter`)
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/chat/completions` | Chat completion — OpenAI-compatible request/response; routes via auto/fast/smart, applies caching, retry, and failover |
+| POST | `/v1/chat/completions/stream` | Same, as an SSE stream |
+| GET | `/v1/cache/stats` | Semantic cache hit/miss stats for the authenticated key |
+| GET | `/v1/ops/health` | Simple ops health check |
+| GET | `/v1/ops/metrics?hours=` | Usage metrics for the authenticated key |
+| GET | `/v1/ops/providers?hours=` | Provider health, scoped to the key |
+| GET | `/v1/ops/providers/metrics?hours=` | Per-provider latency/error metrics |
+| GET | `/v1/ops/models?hours=` | Per-model metrics |
+
+### Admin API (`Authorization: Bearer <admin-token>`, enforced by `AdminWebFilter`, separate from team keys)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/admin/usage?key=` | Usage summary for any team key |
+| GET | `/admin/logs?key=&provider=&model=&status=&limit=` | Filterable request log list |
+| GET | `/admin/logs/{requestId}` | Single request detail by ID |
+| GET | `/admin/cache/stats?key=` | Cache stats for any team key |
+| GET | `/admin/providers/health?hours=` | Health of all configured providers |
+| GET | `/admin/usage/breakdown?key=&groupBy=provider\|model\|day` | Usage/cost breakdown, used by the dashboard chart |
+
+### Mock provider (test infrastructure, not part of the gateway)
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/chat/completions` | OpenAI-compatible fake completion endpoint |
+| GET | `/health` | Mock provider health |
+| GET / POST | `/admin/config` | Runtime failure injection (`mode: down\|rate_limited`, `fail_rate`, `latency_ms`) — used for failover testing |
+
 ## Requirements
 
 - Java 21
@@ -142,20 +186,20 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 ## Using a real provider
 
-The bundled mock providers return canned text and are intended for development only. To route through a real model via OpenRouter:
+The default `gateway-config.json` routes through real models via OpenRouter. Its provider API keys are injected from the `OPENROUTER_API_KEY` environment variable (never hardcoded in the committed file).
 
 1. Obtain an API key from [OpenRouter](https://openrouter.ai) (one key, OpenAI-compatible, supports multiple upstream model families).
 2. Create `.env.local` in the project root:
    ```
    OPENROUTER_API_KEY=sk-or-your-real-key-here
    ```
-3. Start the gateway with the OpenRouter config:
+3. Start the gateway with the key loaded into the environment:
    ```bash
    set -a && . ./.env.local && set +a
-   PRISM_GATEWAY_CONFIG_PATH="$(pwd)/gateway-config.openrouter.json" ./gradlew bootRun
+   ./gradlew bootRun
    ```
 
-No code changes are required — `fast` and `smart` map to real OpenRouter models, and `auto` routes between them based on prompt difficulty. `.env.local` is gitignored; do not commit it or share its contents.
+No code changes are required — `fast` and `smart` map to real OpenRouter models, and `auto` routes between them based on prompt difficulty. The `fast`/`smart` aliases use `alpha` as the primary provider and `beta` as a real fallback (a different model), so a primary-model failure still returns a genuine answer. `.env.local` is gitignored; do not commit it or share its contents.
 
 ## Testing
 
@@ -193,8 +237,7 @@ Prism-Gateway/
 ├── mock-providers/          OpenAI-compatible mock servers
 ├── scripts/                 validation, smoke, and load test scripts
 ├── data/                    sample config/pricing/test data
-├── docker-compose.yml       full-stack orchestration
-└── gateway-config.openrouter.json   config for a real upstream provider
+└── docker-compose.yml       full-stack orchestration
 ```
 
 ## Troubleshooting

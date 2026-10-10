@@ -50,17 +50,21 @@ public class SemanticCacheRepository {
     }
 
     /**
-     * Semantic search: returns the single most similar non-expired entry for
-     * this key + model whose cosine similarity meets the threshold.
+     * Semantic search: finds the single most similar non-expired entry for
+     * this key + model, regardless of whether it meets the threshold.
      *
      * Cosine similarity = 1 - (embedding <=> query). pgvector's &lt;=&gt; operator
      * returns cosine distance in [0, 2].
+     *
+     * Returns empty only when there is no stored entry at all for this
+     * key + model. Otherwise returns the best candidate's similarity so the
+     * caller (SemanticCacheService) can log "closest match was 0.87, needed
+     * 0.95" instead of a bare miss with no diagnostic signal.
      */
-    public Optional<CacheEntry> findSimilar(
+    public Optional<SimilarityCandidate> findMostSimilar(
             UUID keyId,
             String model,
-            float[] embedding,
-            double threshold
+            float[] embedding
     ) {
 
         String vectorLiteral = toVectorLiteral(embedding);
@@ -83,16 +87,15 @@ public class SemanticCacheRepository {
             if (!rs.next()) {
                 return Optional.empty();
             }
-            double similarity = rs.getDouble("similarity");
-            if (similarity < threshold) {
-                return Optional.empty();
-            }
-            return Optional.of(new CacheEntry(
-                    rs.getObject("id", UUID.class),
-                    rs.getString("response"),
-                    rs.getLong("input_tokens"),
-                    rs.getLong("output_tokens"),
-                    similarity
+            return Optional.of(new SimilarityCandidate(
+                    new CacheEntry(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("response"),
+                            rs.getLong("input_tokens"),
+                            rs.getLong("output_tokens"),
+                            rs.getDouble("similarity")
+                    ),
+                    rs.getDouble("similarity")
             ));
         }, vectorLiteral, keyId, model, vectorLiteral);
     }
@@ -197,4 +200,7 @@ public class SemanticCacheRepository {
             long outputTokens,
             double similarity
     ) {}
+
+    /** The closest stored entry for a lookup, and its similarity score — whether or not it clears the caller's threshold. */
+    public record SimilarityCandidate(CacheEntry entry, double similarity) {}
 }

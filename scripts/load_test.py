@@ -1,231 +1,152 @@
 #!/usr/bin/env python3
+"""Concurrency load test for a Prism gateway. Zero dependencies (Python 3.9+ stdlib).
+
+Fires a burst of concurrent, cache-busting chat completions and reports:
+
+  1. Over-admission: with --rpm-limit set to the key's configured limit, the
+     number of accepted (2xx) requests must not exceed the limit. More means
+     the rate limiter has a read-then-write race.
+  2. Accounting totals: client-side sums of requests, tokens, and
+     x-prism-cost-usd headers - compare these against your usage API for the
+     same key and window. They should reconcile exactly.
+  3. Latency: client-observed average and p95 for the burst.
+
+Run against the mock providers so the burst is free and deterministic:
+
+    python3 load_test.py --url http://localhost:8080 --key prism-sk-free-7g8h9i \
+        --model fast --requests 30 --concurrency 10 --rpm-limit 10
+
+Exit code is 1 only when over-admission is detected (with --rpm-limit) or no
+request succeeded at all.
 """
-Prism Gateway — Python load test runner.
-
-Fires TOTAL_REQUESTS across CONCURRENCY parallel workers against a running
-gateway and reports latency percentiles, throughput, HTTP status
-distribution, and cache hit/miss counts (from the x-prism-cache response
-header).
-
-This is a Python counterpart to scripts/load-test.sh — same configuration
-knobs and the same real-provider safety guard, reusing the exact approach
-(env-var config, cache header sniffing, nearest-rank percentiles) rather than
-inventing a different reporting shape. Prefer this version when you want
-JSON output (--json) for feeding into other tooling, or when bash/awk isn't
-available in the target environment.
-
-Stdlib only (urllib + concurrent.futures) — no dependencies to install.
-
-Usage:
-    API_KEY=prism_test_key CONCURRENCY=20 TOTAL_REQUESTS=100 \\
-        python3 scripts/load_test.py
-
-    # machine-readable summary
-    python3 scripts/load_test.py --json
-
-Environment variables (all optional except API_KEY):
-    BASE_URL          default http://localhost:8080
-    API_KEY           Bearer token (REQUIRED; never printed)
-    CONCURRENCY       parallel workers        default 20
-    TOTAL_REQUESTS    total requests to send  default 100
-    MODEL             model/alias             default fast
-    PROMPT            user prompt             default "Explain Redis in one sentence."
-    TIMEOUT           per-request seconds     default 30
-
-SAFETY: by default this targets a gateway backed by mock providers. If your
-gateway routes to a REAL paid provider, you must explicitly opt in:
-    PRISM_REAL_PROVIDER_TEST=true
-Otherwise the script refuses to run more than 200 requests, to avoid
-generating real LLM bills by accident.
-"""
-from __future__ import annotations
-
+import argparse
 import json
-import os
+import statistics
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+import uuid
 
 
-@dataclass
-class RequestOutcome:
-    status: int
-    latency_ms: float
-    cache: str  # "hit" | "miss" | "-"
-
-
-def percentile(sorted_values: list[float], pct: float) -> float:
-    if not sorted_values:
-        return 0.0
-    idx = max(0, min(len(sorted_values) - 1, int((pct / 100.0) * len(sorted_values)) - 1))
-    return sorted_values[idx]
-
-
-def send_one(base_url: str, api_key: str, model: str, prompt: str, timeout: float) -> RequestOutcome:
-    url = f"{base_url}/v1/chat/completions"
-    body = json.dumps({
+def fire(base, key, model, salt, results, lock):
+    body = {
         "model": model,
-        "stream": False,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
+        "messages": [{"role": "user", "content": f"({salt}) What is a message queue and when should I use one?"}],
+    }
     req = urllib.request.Request(
-        url,
-        data=body,
+        base.rstrip("/") + "/v1/chat/completions",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
         method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
     )
     start = time.monotonic()
+    outcome = {"status": None, "latency_ms": None, "cost": None,
+               "prompt_tokens": 0, "completion_tokens": 0, "headers_ok": False}
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            resp.read()
-            latency_ms = (time.monotonic() - start) * 1000
-            cache = resp.headers.get("x-prism-cache", "-")
-            return RequestOutcome(resp.status, latency_ms, cache)
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            payload = json.loads(resp.read().decode(errors="replace"))
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            outcome["status"] = resp.status
+            usage = payload.get("usage") or {}
+            outcome["prompt_tokens"] = usage.get("prompt_tokens", 0)
+            outcome["completion_tokens"] = usage.get("completion_tokens", 0)
+            outcome["headers_ok"] = all(h in headers for h in
+                                        ("x-prism-provider", "x-prism-cache", "x-prism-cost-usd"))
+            try:
+                outcome["cost"] = float(headers.get("x-prism-cost-usd", ""))
+            except ValueError:
+                outcome["cost"] = None
     except urllib.error.HTTPError as e:
+        outcome["status"] = e.code
         e.read()
-        latency_ms = (time.monotonic() - start) * 1000
-        cache = e.headers.get("x-prism-cache", "-") if e.headers else "-"
-        return RequestOutcome(e.code, latency_ms, cache)
-    except urllib.error.URLError:
-        latency_ms = (time.monotonic() - start) * 1000
-        return RequestOutcome(0, latency_ms, "-")
+    except Exception as e:  # timeout, connection refused, malformed body
+        outcome["status"] = f"error: {type(e).__name__}"
+    outcome["latency_ms"] = round((time.monotonic() - start) * 1000)
+    with lock:
+        results.append(outcome)
 
 
-def run_load_test(
-    base_url: str,
-    api_key: str,
-    concurrency: int,
-    total_requests: int,
-    model: str,
-    prompt: str,
-    timeout: float,
-) -> dict:
-    outcomes: list[RequestOutcome] = []
-    start = time.monotonic()
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", required=True, help="gateway base URL")
+    parser.add_argument("--key", required=True, help="virtual API key to burst with")
+    parser.add_argument("--model", default="fast", help="model or alias the key may use")
+    parser.add_argument("--requests", type=int, default=30, help="total requests in the burst")
+    parser.add_argument("--concurrency", type=int, default=10, help="concurrent threads")
+    parser.add_argument("--rpm-limit", type=int, default=None,
+                        help="the key's configured requests-per-minute limit, for the over-admission check")
+    args = parser.parse_args()
 
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [
-            pool.submit(send_one, base_url, api_key, model, prompt, timeout)
-            for _ in range(total_requests)
-        ]
-        for future in as_completed(futures):
-            outcomes.append(future.result())
+    results, lock = [], threading.Lock()
+    print(f"Bursting {args.requests} requests at concurrency {args.concurrency} ...")
+    burst_start = time.monotonic()
 
-    duration = time.monotonic() - start
+    pending = list(range(args.requests))
+    threads = []
 
-    latencies = sorted(o.latency_ms for o in outcomes)
-    status_counts: dict[str, int] = {}
-    ok = rejected = failed = hits = misses = 0
+    def worker():
+        while True:
+            with lock:
+                if not pending:
+                    return
+                pending.pop()
+            fire(args.url, args.key, args.model, uuid.uuid4().hex[:8], results, lock)
 
-    for o in outcomes:
-        key = str(o.status) if o.status else "000"
-        status_counts[key] = status_counts.get(key, 0) + 1
-        if 200 <= o.status < 300:
-            ok += 1
-        elif o.status == 429:
-            rejected += 1
+    for _ in range(min(args.concurrency, args.requests)):
+        t = threading.Thread(target=worker)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+
+    burst_seconds = time.monotonic() - burst_start
+
+    accepted = [r for r in results if r["status"] == 200]
+    rate_limited = [r for r in results if r["status"] == 429]
+    other = [r for r in results if r not in accepted and r not in rate_limited]
+    latencies = [r["latency_ms"] for r in accepted] or [0]
+    costs = [r["cost"] for r in accepted if r["cost"] is not None]
+
+    print(f"\nBurst finished in {burst_seconds:.1f}s")
+    print(f"  accepted (200):      {len(accepted)}")
+    print(f"  rate limited (429):  {len(rate_limited)}")
+    if other:
+        print(f"  other outcomes:      {len(other)}  {sorted({str(r['status']) for r in other})}")
+    print(f"  latency avg/p95 ms:  {round(statistics.mean(latencies))} / "
+          f"{round(sorted(latencies)[max(0, int(len(latencies) * 0.95) - 1)])}")
+
+    missing_headers = [r for r in accepted if not r["headers_ok"]]
+    if missing_headers:
+        print(f"  WARNING: {len(missing_headers)} accepted responses missing x-prism-* headers")
+
+    print("\nClient-side accounting totals - compare with your usage API for this key:")
+    print(f"  accepted requests:   {len(accepted)}")
+    print(f"  prompt tokens:       {sum(r['prompt_tokens'] for r in accepted)}")
+    print(f"  completion tokens:   {sum(r['completion_tokens'] for r in accepted)}")
+    if costs:
+        print(f"  sum of cost headers: {sum(costs):.6f} USD ({len(costs)} of {len(accepted)} had a numeric header)")
+
+    failed = False
+    if not accepted:
+        print("\nFAIL: no request succeeded - is the gateway up and the key valid?")
+        failed = True
+
+    if args.rpm_limit is not None:
+        over = len(accepted) - args.rpm_limit
+        if burst_seconds > 60:
+            print(f"\nNOTE: burst took {burst_seconds:.0f}s (>1 minute); over-admission check "
+                  f"is only meaningful for bursts inside one rate-limit window.")
+        elif over > 0:
+            print(f"\nFAIL: over-admission - {len(accepted)} accepted but the limit is "
+                  f"{args.rpm_limit}. Your rate limiter has a race.")
+            failed = True
         else:
-            failed += 1
-        if o.cache == "hit":
-            hits += 1
-        elif o.cache == "miss":
-            misses += 1
+            print(f"\nOver-admission check OK: {len(accepted)} accepted <= limit {args.rpm_limit}.")
 
-    n = len(outcomes)
-    return {
-        "endpoint": f"{base_url}/v1/chat/completions",
-        "model": model,
-        "concurrency": concurrency,
-        "total_requests": total_requests,
-        "completed": n,
-        "successful_2xx": ok,
-        "rejected_429": rejected,
-        "failed_other": failed,
-        "duration_s": round(duration, 3),
-        "requests_per_sec": round(n / duration, 2) if duration > 0 else 0.0,
-        "avg_latency_ms": round(sum(latencies) / n, 1) if n else 0.0,
-        "min_latency_ms": round(latencies[0], 1) if n else 0.0,
-        "max_latency_ms": round(latencies[-1], 1) if n else 0.0,
-        "p50_latency_ms": round(percentile(latencies, 50), 1),
-        "p95_latency_ms": round(percentile(latencies, 95), 1),
-        "p99_latency_ms": round(percentile(latencies, 99), 1),
-        "cache_hits": hits,
-        "cache_misses": misses,
-        "status_distribution": dict(sorted(status_counts.items())),
-    }
-
-
-def print_human(summary: dict) -> None:
-    print("PRISM load test (python)")
-    print(f"  endpoint     : {summary['endpoint']}")
-    print(f"  model        : {summary['model']}")
-    print(f"  concurrency  : {summary['concurrency']}")
-    print(f"  total        : {summary['total_requests']}")
-    print("  (API key is not printed)")
-    print()
-    print(f"Total requests   : {summary['total_requests']}")
-    print(f"Completed        : {summary['completed']}")
-    print(f"Successful (2xx) : {summary['successful_2xx']}")
-    print(f"Rejected (429)   : {summary['rejected_429']}")
-    print(f"Failed (other)   : {summary['failed_other']}")
-    print(f"Duration (s)     : {summary['duration_s']}")
-    print(f"Requests/sec     : {summary['requests_per_sec']}")
-    print(f"Avg latency (ms) : {summary['avg_latency_ms']}")
-    print(f"Min latency (ms) : {summary['min_latency_ms']}")
-    print(f"Max latency (ms) : {summary['max_latency_ms']}")
-    print(f"p50 (ms)         : {summary['p50_latency_ms']}")
-    print(f"p95 (ms)         : {summary['p95_latency_ms']}")
-    print(f"p99 (ms)         : {summary['p99_latency_ms']}")
-    print(f"Cache hits       : {summary['cache_hits']}")
-    print(f"Cache misses     : {summary['cache_misses']}")
-    print("HTTP status distribution:")
-    for status, count in summary["status_distribution"].items():
-        print(f"  {status} : {count}")
-
-
-def main() -> int:
-    base_url = os.environ.get("BASE_URL", "http://localhost:8080").rstrip("/")
-    api_key = os.environ.get("API_KEY", "")
-    concurrency = int(os.environ.get("CONCURRENCY", "20"))
-    total_requests = int(os.environ.get("TOTAL_REQUESTS", "100"))
-    model = os.environ.get("MODEL", "fast")
-    prompt = os.environ.get("PROMPT", "Explain Redis in one sentence.")
-    timeout = float(os.environ.get("TIMEOUT", "30"))
-    as_json = "--json" in sys.argv[1:]
-
-    if not api_key:
-        print("ERROR: API_KEY env var is required (not printed).", file=sys.stderr)
-        return 1
-
-    real_provider_test = os.environ.get("PRISM_REAL_PROVIDER_TEST", "false").lower() == "true"
-    if not real_provider_test and total_requests > 200:
-        print(
-            f"ERROR: TOTAL_REQUESTS={total_requests} is large and "
-            "PRISM_REAL_PROVIDER_TEST != true.",
-            file=sys.stderr,
-        )
-        print(
-            "       Set PRISM_REAL_PROVIDER_TEST=true to confirm you are NOT "
-            "hitting a paid provider.",
-            file=sys.stderr,
-        )
-        return 1
-
-    summary = run_load_test(base_url, api_key, concurrency, total_requests, model, prompt, timeout)
-
-    if as_json:
-        print(json.dumps(summary, indent=2))
-    else:
-        print_human(summary)
-
-    return 0
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

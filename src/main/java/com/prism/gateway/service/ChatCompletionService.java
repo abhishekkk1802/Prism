@@ -176,18 +176,33 @@ public class ChatCompletionService {
 
                 // 6. Execute, log, and store in cache
                 return Mono.fromCallable(() -> providerExecutor.execute(request, resolvedConfig))
-                        .doOnNext(result -> {
+                        .flatMap(result -> {
                             // Authoritative, race-free budget enforcement: the check
                             // and the usage increment happen atomically in one SQL
                             // statement. The cheap checkAndReserve pre-check above only
                             // fast-fails obviously-over-budget requests before the
-                            // provider call.
-                            budgetAdmissionService.settleWithinBudget(
+                            // provider call; THIS is the gate that actually counts,
+                            // and its result must be honored - a provider call that
+                            // would push the key over budget must not be returned to
+                            // the caller as a success.
+                            boolean withinBudget = budgetAdmissionService.settleWithinBudget(
                                     policy.id(), requestId,
                                     result.inputTokens(), result.outputTokens(),
                                     result.costUsd(), result.cacheHit(),
                                     policy.monthlyBudgetUsd()
                             );
+
+                            if (!withinBudget) {
+                                requestLogService.logRejected(
+                                        policy.id(), requestId, request.model(),
+                                        "budget_exceeded",
+                                        System.currentTimeMillis() - startTime
+                                );
+                                metrics.recordRequest("rejected", request.model(), result.provider(), false, false);
+                                metrics.recordRequestDuration(request.model(), System.currentTimeMillis() - startTime);
+                                return Mono.error(new BudgetExceededException("Monthly budget exceeded"));
+                            }
+
                             requestLogService.logSuccess(
                                     policy.id(), requestId,
                                     request.model(), resolvedTier, resolvedReason,
@@ -211,8 +226,13 @@ public class ChatCompletionService {
                                         result.inputTokens(), result.outputTokens()
                                 );
                             }
+                            return Mono.just(result);
                         })
                         .onErrorResume(e -> {
+                            if (e instanceof BudgetExceededException) {
+                                // Already logged as a rejection above; propagate as-is.
+                                return Mono.error(e);
+                            }
                             requestLogService.logError(
                                     policy.id(), requestId, request.model(), resolvedTier,
                                     e.getMessage(),
